@@ -36,6 +36,7 @@ blob-report/
 playwright/.cache/
 
 # OS and Editor
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 *.suo

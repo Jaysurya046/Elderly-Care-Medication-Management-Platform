@@ -10,6 +10,7 @@
     "build": "pnpm --filter @elder-care/db generate && pnpm -r run build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @elder-care/web test:e2e",
     "type-check": "pnpm -r run type-check",
     "lint": "pnpm -r run lint",
     "db:generate": "pnpm --filter @elder-care/db generate",

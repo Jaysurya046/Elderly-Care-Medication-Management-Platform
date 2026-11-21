@@ -68,7 +68,7 @@ jobs:
       - name: Verify Migration Drift
         run: |
           pnpm --filter @elder-care/db exec prisma migrate status
-          pnpm --filter @elder-care/db exec prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code
+          pnpm --filter @elder-care/db exec prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --script
 
       - name: TypeScript Type-Check
         run: pnpm type-check

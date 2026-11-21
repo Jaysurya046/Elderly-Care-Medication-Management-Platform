@@ -40,7 +40,10 @@ describe('Real Database Concurrency: Parallel Dose Actions', () => {
 
     const profile = await prisma.careProfile.create({
       data: {
-        name: 'Concurrency Test Elder',
+        displayName: 'Concurrency Test Elder',
+        dateOfBirth: new Date('1950-01-01'),
+        bloodType: 'O+',
+        emergencyCode: 'CONC1234',
         ownerId: caregiver1Id,
         timezone: 'Asia/Kolkata',
       },

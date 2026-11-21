@@ -19,6 +19,7 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
       status: { in: ['PENDING', 'SNOOZED'] },
       scheduledAt: { lte: referenceTime },
     },
+    take: 100, // Take the scan in bounded batches
     include: {
       schedule: true,
       profile: true,
@@ -30,19 +31,25 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     const expiryTime = new Date(dose.scheduledAt.getTime() + graceMs);
 
     if (referenceTime >= expiryTime) {
-      await prisma.doseEvent.update({
-        where: { id: dose.id },
+      // Worker auto-miss must be conditional updateMany and only write DoseEventAction row if count === 1
+      const res = await prisma.doseEvent.updateMany({
+        where: {
+          id: dose.id,
+          status: { in: ['PENDING', 'SNOOZED'] },
+        },
         data: { status: 'MISSED' },
       });
 
-      await prisma.doseEventAction.create({
-        data: {
-          doseEventId: dose.id,
-          fromStatus: dose.status,
-          toStatus: 'MISSED',
-          reason: 'Auto-missed after grace period expired',
-        },
-      });
+      if (res.count === 1) {
+        await prisma.doseEventAction.create({
+          data: {
+            doseEventId: dose.id,
+            fromStatus: dose.status,
+            toStatus: 'MISSED',
+            reason: 'Auto-missed after grace period expired',
+          },
+        });
+      }
     }
   }
 

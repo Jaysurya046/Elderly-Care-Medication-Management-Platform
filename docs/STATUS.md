@@ -33,7 +33,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **4. Private Items Hidden** | ⚠️ Partial | Service filter exists, but needs comprehensive real-DB verification across all endpoints and feeds (Phase 1). |
 | **5. Timezone & Quiet Hours Reminders** | ⚠️ Partial | Pure scheduling logic implemented, but worker reminder jobs need real cron integration, Mailpit verification, and stable quiet-hours rescheduling (Phase 4). |
 | **6. Low-Stock & Email Privacy** | ⚠️ Partial | Dose reminders strip medication names, but low-stock email privacy check is not yet integrated (Phase 1 & 4). |
-| **7. Atomic Stock Decrement & Zero Floor** | ❌ Not Implemented | Currently uses read-then-write rather than conditional single-transaction `updateMany` with zero floor (Phase 1). |
+| **7. Atomic Stock Decrement & Zero Floor** | ✅ Complete | Conditional single-transaction `updateMany` with `{ gt: 0 }` and `{ decrement: 1 }` in `recordDoseAction`. Real concurrency suite in `concurrency-real-db.test.ts` and unit verified in `phase1a-dose-security.test.ts`. |
 | **8. Append-Only Audit Log** | ❌ Not Implemented | `AuditLog` table exists, but database-level REVOKE and trigger-based immutability enforcement is missing (Phase 1). |
 | **9. AST Security Route Guard** | ⚠️ Partial | String-matching AST test exists, but need strict parser asserting direct `requireProfileAccess` call in every exported HTTP method and runtime 401/403 verification (Phase 1). |
 | **10. AI Human Confirmation & Disabled by Default** | ✅ Complete | AI flags default to false (`FEATURE_AI_ENABLED=false`). |

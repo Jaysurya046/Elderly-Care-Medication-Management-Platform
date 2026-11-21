@@ -82,3 +82,10 @@ This document records architectural, technical, and domain decisions made throug
 - **Context**: Database schema lifecycle and CI verification.
 - **Decision**: Replace `prisma db push` with committed SQL migrations under `packages/db/prisma/migrations/` and enforce a drift check in CI via `prisma migrate diff --exit-code`.
 - **Rationale**: Guarantees deterministic, traceable database schema evolution with automated drift prevention.
+
+### DEC-012: Atomic Dose Transitions and Zero-Floor Stock Decrement
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Preventing race conditions between concurrent caregivers recording the same dose and preventing negative inventory.
+- **Decision**: Implemented single-transaction conditional update on `DoseEvent` matching `{ id, status: previousStatus, stockDecremented: false }`, raising `ConflictError` with the other caregiver's name on mismatch. Decrement medication inventory atomically via `{ stockCount: { decrement: 1 } }` with a zero floor (`{ stockCount: { gt: 0 } }`), recording `stockDecremented: true` only if the dose update succeeded.
+- **Rationale**: Guarantees that concurrent dose recordings cannot both succeed and medication stock cannot drop below zero or decrement twice.

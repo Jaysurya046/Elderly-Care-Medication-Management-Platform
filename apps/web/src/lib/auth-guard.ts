@@ -27,6 +27,14 @@ export class NotFoundError extends Error {
   }
 }
 
+export class ConflictError extends Error {
+  public statusCode = 409;
+  constructor(message: string = 'Conflict: resource was modified concurrently.') {
+    super(message);
+    this.name = 'ConflictError';
+  }
+}
+
 export interface ProfileAccessOptions {
   role?: Role;
   scope?: ScopeKey;

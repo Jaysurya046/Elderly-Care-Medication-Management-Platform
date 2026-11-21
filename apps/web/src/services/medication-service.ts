@@ -6,7 +6,7 @@ import {
   classifyTimeOfDayBlock,
   GeneratedDoseSlot,
 } from '@elder-care/core';
-import { requireProfileAccess } from '../lib/auth-guard';
+import { requireProfileAccess, ConflictError, NotFoundError, ForbiddenError } from '../lib/auth-guard';
 import { recordAuditLog } from '../lib/audit';
 
 export interface CreateMedicationInput {
@@ -167,7 +167,8 @@ export interface RecordDoseActionInput {
 export async function recordDoseAction(
   doseEventId: string,
   input: RecordDoseActionInput,
-  actorUserId?: string
+  actorUserId?: string,
+  expectedProfileId?: string
 ): Promise<DoseEvent> {
   const doseEvent = await prisma.doseEvent.findUnique({
     where: { id: doseEventId },
@@ -179,16 +180,49 @@ export async function recordDoseAction(
   });
 
   if (!doseEvent) {
-    throw new Error('Dose event not found.');
+    throw new NotFoundError('Dose event not found.');
   }
 
+  // Dose belongs to profile: verify against expectedProfileId if provided
+  if (expectedProfileId && doseEvent.profileId !== expectedProfileId) {
+    throw new NotFoundError('Dose event does not belong to specified profile.');
+  }
+
+  // Always use the dose's own profileId, never trust caller-supplied profile id
   const profileId = doseEvent.profileId;
   const { membership } = await requireProfileAccess(profileId, {
-    scope: 'view_medications',
     userIdOverride: actorUserId,
   });
 
+  // FAMILY must be view-only: TAKE, SNOOZE, SKIP, CORRECTION require manage_medications or OWNER/CAREGIVER
   const isPrivileged = membership.role === Role.OWNER || membership.role === Role.CAREGIVER;
+  const membershipScopes = (membership.scopes || {}) as Record<string, boolean>;
+
+  if (membership.role === Role.FAMILY) {
+    await recordAuditLog({
+      profileId,
+      actorUserId: membership.userId,
+      actorMembershipId: membership.id,
+      action: 'DOSE:ACTION_DENIED',
+      entityType: 'DoseEvent',
+      entityId: doseEvent.id,
+      metadata: { reason: 'FAMILY_ROLE_VIEW_ONLY', action: input.action },
+    });
+    throw new ForbiddenError('FAMILY role is view-only for medications.');
+  }
+
+  if (!isPrivileged && !membershipScopes.manage_medications) {
+    await recordAuditLog({
+      profileId,
+      actorUserId: membership.userId,
+      actorMembershipId: membership.id,
+      action: 'DOSE:ACTION_DENIED',
+      entityType: 'DoseEvent',
+      entityId: doseEvent.id,
+      metadata: { reason: 'MISSING_MANAGE_MEDICATIONS_SCOPE', action: input.action },
+    });
+    throw new ForbiddenError('You do not have the required scope (manage_medications).');
+  }
 
   // Run pure domain state transition
   const transitionResult = transitionDose({
@@ -206,61 +240,74 @@ export async function recordDoseAction(
 
   const now = new Date();
   const medicationId = doseEvent.schedule.medicationId;
-  const currentStock = doseEvent.schedule.medication.stockCount;
+  const previousStatus = doseEvent.status;
+  const shouldDecrement = transitionResult.shouldDecrementStock && !doseEvent.stockDecremented;
 
-  // Execute database transaction with conditional update to prevent double-action concurrency
+  // Execute single transaction with atomic conditional update
   const updatedDoseEvent = await prisma.$transaction(async (tx) => {
-    // 1. Conditional check: ensure status has not changed concurrently by another caregiver
-    const freshDose = await tx.doseEvent.findUnique({
-      where: { id: doseEventId },
-    });
-
-    if (!freshDose) throw new Error('Dose event no longer exists.');
-
-    // If another caregiver already acted on it
-    if (
-      freshDose.status !== doseEvent.status &&
-      input.action !== 'CORRECTION'
-    ) {
-      throw new Error(`Already recorded by another caregiver (Status: ${freshDose.status}).`);
+    // 1. Atomic dose transition with conditional updateMany
+    const updateWhere: any = {
+      id: doseEventId,
+      status: previousStatus,
+    };
+    if (shouldDecrement) {
+      updateWhere.stockDecremented = false;
     }
 
-    // 2. Decrement stock if required and not already decremented
-    let finalStockDecremented = freshDose.stockDecremented;
-    if (transitionResult.shouldDecrementStock && !freshDose.stockDecremented) {
-      const newStock = decrementStock(currentStock, 1);
-      await tx.medication.update({
-        where: { id: medicationId },
-        data: { stockCount: newStock },
-      });
-      finalStockDecremented = true;
-    }
-
-    // 3. Update DoseEvent
-    const updated = await tx.doseEvent.update({
-      where: { id: doseEventId },
+    const res = await tx.doseEvent.updateMany({
+      where: updateWhere,
       data: {
         status: transitionResult.newStatus as any,
-        snoozeCount: transitionResult.newSnoozeCount,
         actedAt: now,
         actedByMembershipId: membership.id,
-        note: input.note || input.skipReason || freshDose.note,
-        stockDecremented: finalStockDecremented,
+        snoozeCount: transitionResult.newSnoozeCount,
+        note: input.note || input.skipReason || doseEvent.note,
+        ...(shouldDecrement ? { stockDecremented: true } : {}),
       },
     });
 
-    // 4. Record append-only DoseEventAction history
+    if (res.count !== 1) {
+      const fresh = await tx.doseEvent.findUnique({
+        where: { id: doseEventId },
+      });
+      let actorName = (fresh as any)?.actedByMembership?.user?.name;
+      if (!actorName && fresh?.actedByMembershipId) {
+        const actingMembership = await tx.membership.findUnique({
+          where: { id: fresh.actedByMembershipId },
+          include: {
+            user: { select: { id: true, name: true } },
+          },
+        });
+        if (actingMembership?.user?.name) {
+          actorName = actingMembership.user.name;
+        }
+      }
+      throw new ConflictError(`Already recorded by ${actorName || 'another member'}.`);
+    }
+
+    // 2. Atomic stock decrement with a zero floor: never write an absolute value
+    if (shouldDecrement) {
+      await tx.medication.updateMany({
+        where: { id: medicationId, stockCount: { gt: 0 } },
+        data: { stockCount: { decrement: 1 } },
+      });
+    }
+
+    // 3. Record append-only DoseEventAction history
     await tx.doseEventAction.create({
       data: {
         doseEventId: doseEvent.id,
-        fromStatus: doseEvent.status,
+        fromStatus: previousStatus,
         toStatus: transitionResult.newStatus as any,
         membershipId: membership.id,
         reason: input.skipReason || input.note || null,
       },
     });
 
-    return updated;
+    const updated = await tx.doseEvent.findUnique({
+      where: { id: doseEventId },
+    });
+    return updated!;
   });
 
   // Record immutable audit log entry
@@ -272,7 +319,7 @@ export async function recordDoseAction(
     entityType: 'DoseEvent',
     entityId: doseEvent.id,
     metadata: {
-      fromStatus: doseEvent.status,
+      fromStatus: previousStatus,
       toStatus: transitionResult.newStatus,
       action: input.action,
     },

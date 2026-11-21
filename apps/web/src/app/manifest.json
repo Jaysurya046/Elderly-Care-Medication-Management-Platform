@@ -1,0 +1,21 @@
+{
+  "name": "Elder Care & Medication Management Platform",
+  "short_name": "ElderCare",
+  "description": "Accessible medicine schedules, appointments, and care circle updates for older adults and families.",
+  "start_url": "/senior",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

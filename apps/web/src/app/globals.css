@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --focus-ring: #2563eb;
+  --senior-font-scale: 1rem;
+}
+
+/* High Contrast Mode (7:1 contrast compliance) */
+body.high-contrast {
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --border: #000000;
+  --primary: #0000ee;
+  --primary-foreground: #ffffff;
+  --focus-ring: #000000;
+}
+
+body.high-contrast * {
+  border-color: #000000 !important;
+}
+
+body.high-contrast button {
+  border-width: 2px !important;
+}
+
+/* Senior Mode font-scaling */
+body.text-large {
+  font-size: 22px !important;
+  line-height: 32px !important;
+}
+
+body.text-xlarge {
+  font-size: 26px !important;
+  line-height: 38px !important;
+}
+
+/* Focus styles for keyboard accessibility */
+*:focus-visible {
+  outline: 3px solid var(--focus-ring) !important;
+  outline-offset: 3px !important;
+}
+
+/* Minimum 48px touch targets with 8px spacing */
+button,
+a,
+input,
+select,
+textarea {
+  min-height: 48px;
+  touch-action: manipulation;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Print styles for Emergency Card */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 14pt !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .emergency-card-container {
+    border: 3px solid #000000 !important;
+    padding: 24px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+}

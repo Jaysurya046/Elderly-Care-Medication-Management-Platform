@@ -1,0 +1,324 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  CAREGIVER
+  FAMILY
+  EMERGENCY_VIEWER
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  REVOKED
+}
+
+enum MedicationCriticality {
+  STANDARD
+  CRITICAL
+}
+
+enum DoseStatus {
+  PENDING
+  TAKEN
+  LATE_TAKEN
+  SKIPPED
+  SNOOZED
+  MISSED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id              String        @id @default(uuid()) @db.Uuid
+  email           String        @unique
+  name            String
+  passwordHash    String
+  totpSecret      String?       // Encrypted at rest
+  consentVersion  String?       @default("v1.0")
+  createdAt       DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(6)
+  deletedAt       DateTime?     @db.Timestamptz(6)
+
+  ownedProfiles   CareProfile[] @relation("ProfileOwner")
+  memberships     Membership[]
+  deviceTokens    DeviceToken[]
+  sessions        Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model CareProfile {
+  id                      String         @id @default(uuid()) @db.Uuid
+  ownerId                 String         @db.Uuid
+  owner                   User           @relation("ProfileOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  displayName             String
+  dateOfBirth             DateTime       @db.Date
+  timezone                String         @default("Asia/Kolkata")
+  bloodType               String         // e.g. "O+", "B+"
+  allergies               String         @default("") // plain text
+  conditions              String         @default("") // plain text
+  primaryDoctorName       String         @default("")
+  preferredHospital       String         @default("")
+  emergencyCode           String         @unique // 8-character printable code
+  emailShowsMedicineNames Boolean        @default(false)
+  readAloudEnabled        Boolean        @default(true)
+  deletionRequestedAt     DateTime?      @db.Timestamptz(6)
+  createdAt               DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime       @updatedAt @db.Timestamptz(6)
+
+  memberships             Membership[]
+  invitations             Invitation[]
+  medications             Medication[]
+  doseEvents              DoseEvent[]
+  appointments            Appointment[]
+  careNotes               CareNote[]
+  notificationLogs        NotificationLog[]
+  auditLogs               AuditLog[]
+
+  @@index([ownerId])
+  @@map("care_profiles")
+}
+
+model Membership {
+  id                   String           @id @default(uuid()) @db.Uuid
+  profileId            String           @db.Uuid
+  profile              CareProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  userId               String           @db.Uuid
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                 Role
+  scopes               Json             // Record<ScopeKey, boolean>
+  status               MembershipStatus @default(ACTIVE)
+  passcodeHash         String?          // 4-6 digit numeric passcode (Argon2id)
+  passcodeFailures     Int              @default(0)
+  passcodeLockedUntil  DateTime?        @db.Timestamptz(6)
+  createdAt            DateTime         @default(now()) @db.Timestamptz(6)
+  revokedAt            DateTime?        @db.Timestamptz(6)
+
+  careNotes            CareNote[]
+  doseActions          DoseEventAction[]
+
+  @@unique([profileId, userId])
+  @@index([profileId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+model Invitation {
+  id        String      @id @default(uuid()) @db.Uuid
+  profileId String      @db.Uuid
+  profile   CareProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  email     String
+  role      Role
+  scopes    Json
+  tokenHash String      @unique
+  expiresAt DateTime    @db.Timestamptz(6)
+  usedAt    DateTime?   @db.Timestamptz(6)
+  createdAt DateTime    @default(now()) @db.Timestamptz(6)
+
+  @@index([profileId])
+  @@index([email])
+  @@map("invitations")
+}
+
+model Medication {
+  id              String                @id @default(uuid()) @db.Uuid
+  profileId       String                @db.Uuid
+  profile         CareProfile           @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name            String
+  genericName     String?
+  strength        String                // e.g. "500 mg"
+  form            String                // e.g. "Tablet", "Capsule", "Drops"
+  instructions    String?               // e.g. "With breakfast"
+  criticality     MedicationCriticality @default(STANDARD)
+  prescribedBy    String?
+  startDate       DateTime              @db.Date
+  endDate         DateTime?             @db.Date
+  stockCount      Int                   @default(0)
+  refillThreshold Int                   @default(5)
+  isActive        Boolean               @default(true)
+  createdAt       DateTime              @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(6)
+
+  schedules       Schedule[]
+
+  @@index([profileId])
+  @@map("medications")
+}
+
+model Schedule {
+  id                   String      @id @default(uuid()) @db.Uuid
+  medicationId         String      @db.Uuid
+  medication           Medication  @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  rrule                String      // RRULE:FREQ=DAILY;INTERVAL=1
+  timesOfDay           Json        // ["08:00", "20:00"]
+  startsOn             DateTime    @db.Date
+  endsOn               DateTime?   @db.Date
+  graceMinutes         Int         @default(60)
+  snoozeMinutes        Int         @default(15)
+  escalateToCaregivers Boolean     @default(true)
+  createdAt            DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime    @updatedAt @db.Timestamptz(6)
+
+  doseEvents           DoseEvent[]
+
+  @@index([medicationId])
+  @@map("schedules")
+}
+
+model DoseEvent {
+  id                  String            @id @default(uuid()) @db.Uuid
+  scheduleId          String            @db.Uuid
+  schedule            Schedule          @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  profileId           String            @db.Uuid
+  profile             CareProfile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  scheduledAt         DateTime          @db.Timestamptz(6)
+  status              DoseStatus        @default(PENDING)
+  snoozeCount         Int               @default(0)
+  actedAt             DateTime?         @db.Timestamptz(6)
+  actedByMembershipId String?           @db.Uuid
+  note                String?
+  stockDecremented    Boolean           @default(false)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(6)
+
+  actions             DoseEventAction[]
+
+  @@unique([scheduleId, scheduledAt])
+  @@index([profileId, scheduledAt])
+  @@index([status])
+  @@map("dose_events")
+}
+
+model DoseEventAction {
+  id           String     @id @default(uuid()) @db.Uuid
+  doseEventId  String     @db.Uuid
+  doseEvent    DoseEvent  @relation(fields: [doseEventId], references: [id], onDelete: Cascade)
+  fromStatus   DoseStatus
+  toStatus     DoseStatus
+  membershipId String?    @db.Uuid
+  membership   Membership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  reason       String?
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+
+  @@index([doseEventId])
+  @@map("dose_event_actions")
+}
+
+model Appointment {
+  id                     String            @id @default(uuid()) @db.Uuid
+  profileId              String            @db.Uuid
+  profile                CareProfile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title                  String
+  doctorName             String
+  specialty              String?
+  clinicName             String?
+  address                String?
+  startsAt               DateTime          @db.Timestamptz(6)
+  travelMinutes          Int               @default(0)
+  status                 AppointmentStatus @default(SCHEDULED)
+  isPrivate              Boolean           @default(false)
+  notes                  String?
+  questionsToAsk         String?           @db.Text
+  reminderOffsetsMinutes Json              @default("[10080, 1440, 120]") // 7 days, 1 day, 2 hours
+  createdAt              DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime          @updatedAt @db.Timestamptz(6)
+
+  @@index([profileId, startsAt])
+  @@map("appointments")
+}
+
+model CareNote {
+  id                 String      @id @default(uuid()) @db.Uuid
+  profileId          String      @db.Uuid
+  profile            CareProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  authorMembershipId String      @db.Uuid
+  authorMembership   Membership  @relation(fields: [authorMembershipId], references: [id], onDelete: Cascade)
+  body               String      @db.Text
+  isPrivate          Boolean     @default(false)
+  createdAt          DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime    @updatedAt @db.Timestamptz(6)
+
+  @@index([profileId, createdAt])
+  @@map("care_notes")
+}
+
+model NotificationLog {
+  id              String             @id @default(uuid()) @db.Uuid
+  profileId       String             @db.Uuid
+  profile         CareProfile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  recipientUserId String             @db.Uuid
+  type            String             // UPCOMING_DOSE, DOSE_DUE_NOW, DOSE_MISSED, CRITICAL_ESCALATION, etc.
+  referenceKey    String             @unique
+  channel         String             @default("EMAIL")
+  status          NotificationStatus @default(PENDING)
+  attempts        Int                @default(0)
+  sentAt          DateTime?          @db.Timestamptz(6)
+  error           String?
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+
+  @@index([profileId])
+  @@index([recipientUserId])
+  @@map("notification_logs")
+}
+
+model AuditLog {
+  id                String       @id @default(uuid()) @db.Uuid
+  profileId         String?      @db.Uuid
+  profile           CareProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  actorUserId       String?      @db.Uuid
+  actorMembershipId String?      @db.Uuid
+  action            String
+  entityType        String
+  entityId          String?
+  metadata          Json?        // STRICTLY NO HEALTH VALUES OR PASSWORDS
+  ip                String?      // Hashed or truncated
+  userAgent         String?
+  createdAt         DateTime     @default(now()) @db.Timestamptz(6)
+
+  @@index([profileId, createdAt])
+  @@index([actorUserId])
+  @@map("audit_logs")
+}
+
+model DeviceToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  label      String?
+  lastUsedAt DateTime @default(now()) @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("device_tokens")
+}

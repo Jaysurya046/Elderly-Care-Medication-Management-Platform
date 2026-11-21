@@ -1,0 +1,35 @@
+{
+  "name": "elder-care-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @elder-care/web dev",
+    "dev:worker": "pnpm --filter @elder-care/worker dev",
+    "dev:all": "pnpm --parallel run dev",
+    "build": "pnpm --filter @elder-care/db generate && pnpm -r run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "pnpm -r run type-check",
+    "lint": "pnpm -r run lint",
+    "db:generate": "pnpm --filter @elder-care/db generate",
+    "db:migrate": "pnpm --filter @elder-care/db migrate",
+    "db:seed": "pnpm --filter @elder-care/db seed"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "@node-rs/argon2",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  },
+  "packageManager": "pnpm@12.21.0"
+}

@@ -10,6 +10,12 @@ jobs:
   validate:
     name: Lint, Type-Check & Test
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elder_care
+      REDIS_URL: redis://localhost:6379
+      AUTH_SECRET: dev-auth-secret-key-32-chars-long!
+      APP_ENCRYPTION_KEY: 01234567890123456789012345678901
+      APP_BASE_URL: http://localhost:3000
 
     services:
       postgres:

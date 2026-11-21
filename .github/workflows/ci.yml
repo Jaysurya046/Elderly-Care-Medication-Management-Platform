@@ -67,15 +67,8 @@ jobs:
 
       - name: Verify Migration Drift
         run: |
-          DIFF=$(pnpm --filter @elder-care/db exec prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script)
-          echo "Drift diff output:"
-          echo "$DIFF"
-          REAL_DRIFT=$(echo "$DIFF" | grep -v "_prisma_migrations" | grep -v "^--" | grep -v "^$" || true)
-          if [ -n "$REAL_DRIFT" ]; then
-            echo "Real schema drift detected: $REAL_DRIFT"
-            exit 1
-          fi
-          echo "No schema drift detected."
+          pnpm --filter @elder-care/db exec prisma migrate status
+          pnpm --filter @elder-care/db exec prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code
 
       - name: TypeScript Type-Check
         run: pnpm type-check

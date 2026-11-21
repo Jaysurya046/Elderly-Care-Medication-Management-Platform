@@ -2,6 +2,7 @@
   "name": "elder-care-platform",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @elder-care/web dev",

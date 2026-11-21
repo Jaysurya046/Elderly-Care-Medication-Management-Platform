@@ -126,3 +126,10 @@ pnpm lint
 - **Stateless JWTs Prohibited**: Uses server-side session records in PostgreSQL with opaque httpOnly cookies for immediate revocation.
 - **Audit Logging**: All reads and writes to sensitive health data create immutable audit logs with sanitized metadata (no health payloads or credentials).
 - **Rate Limiting**: Redis-backed brute force protection on login and passcode verification endpoints.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/LICENSE).
+

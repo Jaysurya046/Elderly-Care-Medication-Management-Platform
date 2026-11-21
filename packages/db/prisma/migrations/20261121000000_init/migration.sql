@@ -1,7 +1,4 @@
-﻿-- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
--- CreateEnum
+﻿-- CreateEnum
 CREATE TYPE "Role" AS ENUM ('OWNER', 'CAREGIVER', 'FAMILY', 'EMERGENCY_VIEWER');
 
 -- CreateEnum

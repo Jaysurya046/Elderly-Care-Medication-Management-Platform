@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+-- CreateEnum
 CREATE TYPE "Role" AS ENUM ('OWNER', 'CAREGIVER', 'FAMILY', 'EMERGENCY_VIEWER');
 
 -- CreateEnum
@@ -180,7 +180,7 @@ CREATE TABLE "appointments" (
     "isPrivate" BOOLEAN NOT NULL DEFAULT false,
     "notes" TEXT,
     "questionsToAsk" TEXT,
-    "reminderOffsetsMinutes" JSONB NOT NULL DEFAULT '[10080, 1440, 120]',
+    "reminderOffsetsMinutes" JSONB NOT NULL DEFAULT '[10080, 1440, 120]'::jsonb,
     "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(6) NOT NULL,
 

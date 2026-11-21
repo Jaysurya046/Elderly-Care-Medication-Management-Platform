@@ -249,7 +249,7 @@ model Appointment {
   isPrivate              Boolean           @default(false)
   notes                  String?
   questionsToAsk         String?           @db.Text
-  reminderOffsetsMinutes Json              @default("[10080, 1440, 120]") // 7 days, 1 day, 2 hours
+  reminderOffsetsMinutes Json              @default(dbgenerated("'[10080, 1440, 120]'::jsonb")) // 7 days, 1 day, 2 hours
   createdAt              DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt              DateTime          @updatedAt @db.Timestamptz(6)
 

@@ -15,7 +15,8 @@ import {
 export interface LowStockAlertEmailProps {
   caregiverName: string;
   elderName: string;
-  medicineName: string;
+  medicineName?: string;
+  showMedicineName?: boolean;
   stockCount: number;
   refillThreshold: number;
   appUrl: string;
@@ -25,22 +26,33 @@ export function LowStockAlertEmail({
   caregiverName = 'Rajesh',
   elderName = 'Kamala Devi',
   medicineName = 'Metformin 500mg',
+  showMedicineName = false,
   stockCount = 4,
   refillThreshold = 10,
   appUrl = 'http://localhost:3000/dashboard/medications',
 }: LowStockAlertEmailProps) {
+  const previewText = showMedicineName
+    ? `Low stock alert: ${medicineName} for ${elderName}`
+    : 'A refill is needed. Open the app to see which medicine.';
+
   return (
     <Html>
       <Head />
-      <Preview>Low stock alert: {medicineName} for {elderName}</Preview>
+      <Preview>{previewText}</Preview>
       <Body style={main}>
         <Container style={container}>
           <Heading style={heading}>Refill Needed</Heading>
           <Text style={paragraph}>Hello {caregiverName},</Text>
-          <Text style={paragraph}>
-            The inventory for <strong>{medicineName}</strong> for <strong>{elderName}</strong> has
-            fallen to <strong>{stockCount}</strong> remaining units (threshold: {refillThreshold}).
-          </Text>
+          {showMedicineName ? (
+            <Text style={paragraph}>
+              The inventory for <strong>{medicineName}</strong> for <strong>{elderName}</strong> has
+              fallen to <strong>{stockCount}</strong> remaining units (threshold: {refillThreshold}).
+            </Text>
+          ) : (
+            <Text style={paragraph}>
+              A refill is needed. Open the app to see which medicine.
+            </Text>
+          )}
           <Text style={paragraph}>
             Please order or arrange a prescription refill promptly to ensure daily medication is
             not interrupted.

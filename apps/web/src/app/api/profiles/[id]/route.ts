@@ -10,10 +10,16 @@ export async function GET(
     const { id } = await params;
     const { profile, membership } = await requireProfileAccess(id);
 
+    const profileData = { ...profile };
+    // Emergency code exposure: return emergencyCode ONLY to OWNER
+    if (membership.role !== 'OWNER') {
+      delete (profileData as any).emergencyCode;
+    }
+
     return NextResponse.json({
       success: true,
       data: {
-        profile,
+        profile: profileData,
         userRole: membership.role,
         scopes: membership.scopes,
       },

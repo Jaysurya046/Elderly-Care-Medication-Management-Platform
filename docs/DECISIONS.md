@@ -89,3 +89,10 @@ This document records architectural, technical, and domain decisions made throug
 - **Context**: Preventing race conditions between concurrent caregivers recording the same dose and preventing negative inventory.
 - **Decision**: Implemented single-transaction conditional update on `DoseEvent` matching `{ id, status: previousStatus, stockDecremented: false }`, raising `ConflictError` with the other caregiver's name on mismatch. Decrement medication inventory atomically via `{ stockCount: { decrement: 1 } }` with a zero floor (`{ stockCount: { gt: 0 } }`), recording `stockDecremented: true` only if the dose update succeeded.
 - **Rationale**: Guarantees that concurrent dose recordings cannot both succeed and medication stock cannot drop below zero or decrement twice.
+
+### DEC-013: Secrets Scrubbing, Emergency Code Role Scoping, and Passcode Session Binding
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Data minimization, emergency code exposure, and credential validation boundaries.
+- **Decision**: All Prisma queries including `user` must select strictly `{ id: true, name: true }`, ensuring `passwordHash`, `totpSecret`, and `passcodeHash` are never loaded or returned. `GET /api/profiles/[id]` strips `emergencyCode` for all non-OWNER callers. Removed the hardcoded fallback encryption key in `crypto.ts`, enforcing strict 32-byte hex validation. `verifyMemberPasscode` requires an authenticated session matching `membership.userId === user.id` with ACTIVE status, backed by Redis rate-limiting (5 attempts per 15 mins).
+- **Rationale**: Meets strict privacy, healthcare compliance, and anti-tamper requirements specified in Goal.md.

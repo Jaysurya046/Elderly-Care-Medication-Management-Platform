@@ -1,7 +1,9 @@
 import type { NextConfig } from 'next';
+import path from 'node:path';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: path.join(__dirname, '../../'),
   transpilePackages: ['@elder-care/core', '@elder-care/ui', '@elder-care/email', '@elder-care/db'],
   // Security headers (Section 8: TLS only, HSTS, CSP, etc.)
   async headers() {

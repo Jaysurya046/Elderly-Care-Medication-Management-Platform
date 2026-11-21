@@ -9,6 +9,7 @@ import {
 } from '../lib/crypto';
 import { checkRateLimit, resetRateLimit } from '../lib/rate-limiter';
 import { recordAuditLog } from '../lib/audit';
+import { UnauthorizedError, ForbiddenError } from '../lib/auth-guard';
 
 export interface SignUpInput {
   email: string;
@@ -126,8 +127,14 @@ export async function setMemberPasscode(
 
 export async function verifyMemberPasscode(
   membershipId: string,
-  candidatePasscode: string
+  candidatePasscode: string,
+  signedInUser?: User | string | null
 ): Promise<{ success: boolean; error?: string }> {
+  const userId = typeof signedInUser === 'string' ? signedInUser : signedInUser?.id;
+  if (!userId) {
+    throw new UnauthorizedError('Passcode verification requires a signed-in session.');
+  }
+
   const membership = await prisma.membership.findUnique({
     where: { id: membershipId },
   });
@@ -136,7 +143,27 @@ export async function verifyMemberPasscode(
     return { success: false, error: 'No passcode configured for this profile.' };
   }
 
-  // Check lockout
+  // Verify membership belongs to signed-in user
+  if (membership.userId !== userId) {
+    throw new ForbiddenError('Membership does not belong to the signed-in user.');
+  }
+
+  // Verify membership is active
+  if (membership.status !== 'ACTIVE') {
+    throw new ForbiddenError('Membership is not active.');
+  }
+
+  // Rate limit passcode attempts in Redis (5 per 15 minutes per membership)
+  const rateLimitKey = `passcode:${membership.id}`;
+  const rateLimit = await checkRateLimit(rateLimitKey, 5, 15 * 60);
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: 'Passcode locked due to 5 consecutive failures. Please try again in 15 minute(s).',
+    };
+  }
+
+  // Check database lockout
   const now = new Date();
   if (membership.passcodeLockedUntil && membership.passcodeLockedUntil > now) {
     const minutesLeft = Math.ceil(
@@ -151,7 +178,8 @@ export async function verifyMemberPasscode(
   const isValid = await verifySecret(membership.passcodeHash, candidatePasscode);
 
   if (isValid) {
-    // Reset failure counter on success
+    // Reset Redis rate limit counter and DB failure counter on success
+    await resetRateLimit(rateLimitKey);
     await prisma.membership.update({
       where: { id: membershipId },
       data: {

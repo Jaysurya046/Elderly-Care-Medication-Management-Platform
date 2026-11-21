@@ -21,9 +21,28 @@ export async function verifySecret(hashString: string, candidate: string): Promi
 }
 
 // 2. Encryption at rest for TOTP secrets (AES-256-GCM)
-function getEncryptionKey(): Buffer {
-  const hexKey = process.env.APP_ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+export function validateEncryptionKey(customKey?: string): Buffer {
+  const hexKey = customKey ?? process.env.APP_ENCRYPTION_KEY;
+  if (!hexKey) {
+    throw new Error('APP_ENCRYPTION_KEY environment variable is required and cannot be empty.');
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(hexKey)) {
+    throw new Error('APP_ENCRYPTION_KEY must be exactly 32 bytes of hex (64 hex characters).');
+  }
   return Buffer.from(hexKey, 'hex');
+}
+
+// Enforce key validation at runtime in production (excluding static next build page collection)
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.NEXT_PHASE !== 'phase-production-build' &&
+  process.env.APP_ENCRYPTION_KEY
+) {
+  validateEncryptionKey();
+}
+
+function getEncryptionKey(): Buffer {
+  return validateEncryptionKey();
 }
 
 export function encryptString(plaintext: string): string {

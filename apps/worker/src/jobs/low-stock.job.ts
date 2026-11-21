@@ -51,10 +51,16 @@ export async function processLowStockAlerts(referenceTime: Date = new Date()): P
 
       if (recentLog) continue; // Already alerted within 48h
 
+      const showMedicine = Boolean(med.profile.emailShowsMedicineNames);
+      const subject = showMedicine
+        ? `Low Stock Alert: ${med.name} for ${med.profile.displayName}`
+        : 'A refill is needed. Open the app to see which medicine.';
+
       const template = React.createElement(LowStockAlertEmail, {
         caregiverName: recipient.name,
         elderName: med.profile.displayName,
         medicineName: `${med.name} (${med.strength})`,
+        showMedicineName: showMedicine,
         stockCount: med.stockCount,
         refillThreshold: med.refillThreshold,
         appUrl: `${appBaseUrl}/dashboard/medications`,
@@ -74,7 +80,7 @@ export async function processLowStockAlerts(referenceTime: Date = new Date()): P
 
       const sendResult = await sendEmail({
         to: recipient.email,
-        subject: `Low Stock Alert: ${med.name} for ${med.profile.displayName}`,
+        subject,
         template,
       });
 

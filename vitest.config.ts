@@ -8,6 +8,9 @@ export default defineConfig({
     },
   },
   test: {
+    env: {
+      APP_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    },
     include: ['**/__tests__/**/*.{test,spec}.ts'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
   },

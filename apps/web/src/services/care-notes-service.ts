@@ -30,7 +30,7 @@ export async function createCareNote(
     profileId,
     actorUserId: membership.userId,
     actorMembershipId: membership.id,
-    action: 'CARE_CIRCLE:UPDATE_SCOPES',
+    action: 'CARE_NOTE:CREATE',
     entityType: 'CareNote',
     entityId: note.id,
     metadata: { isPrivate: note.isPrivate },
@@ -58,7 +58,11 @@ export async function getCareNotes(
     },
     include: {
       authorMembership: {
-        include: { user: true },
+        include: {
+          user: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -103,7 +107,11 @@ export async function getActivityFeed(
         },
       },
       membership: {
-        include: { user: true },
+        include: {
+          user: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -132,7 +140,11 @@ export async function getActivityFeed(
     },
     include: {
       authorMembership: {
-        include: { user: true },
+        include: {
+          user: {
+            select: { id: true, name: true },
+          },
+        },
       },
     },
     orderBy: { createdAt: 'desc' },

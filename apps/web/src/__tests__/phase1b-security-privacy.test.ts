@@ -178,13 +178,13 @@ describe('Phase 1b: Secrets Scrubbing, Privacy, Encryption Key & Passcode Sessio
     const originalKey = process.env.APP_ENCRYPTION_KEY;
 
     try {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       delete process.env.APP_ENCRYPTION_KEY;
 
       expect(() => encryptString('test')).toThrow(/APP_ENCRYPTION_KEY.*required/i);
     } finally {
-      process.env.NODE_ENV = originalEnv;
-      process.env.APP_ENCRYPTION_KEY = originalKey;
+      (process.env as any).NODE_ENV = originalEnv;
+      process.env.APP_ENCRYPTION_KEY = originalKey || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     }
   });
 
@@ -204,5 +204,49 @@ describe('Phase 1b: Secrets Scrubbing, Privacy, Encryption Key & Passcode Sessio
     await expect(
       verifyMemberPasscode('membership-1', '1234', 'user-bob')
     ).rejects.toThrow(/signed-in user|Forbidden/i);
+  });
+
+  // Comprehensive recursive check: walks API response shapes and asserts zero leaked secret keys
+  it('Comprehensive: walks API response shapes and asserts none contains passwordHash, totpSecret, passcodeHash, or tokenHash', async () => {
+    function assertNoSecrets(obj: any, path = ''): void {
+      if (!obj || typeof obj !== 'object') return;
+      const forbidden = ['passwordHash', 'totpSecret', 'passcodeHash', 'tokenHash'];
+      for (const key of Object.keys(obj)) {
+        expect(forbidden, `Secret "${key}" found at path "${path}.${key}"`).not.toContain(key);
+        assertNoSecrets(obj[key], path ? `${path}.${key}` : key);
+      }
+    }
+
+    const { requireProfileAccess } = await import('../lib/auth-guard');
+    (requireProfileAccess as any).mockResolvedValue({
+      profile: {
+        id: 'prof-1',
+        displayName: 'Kamala',
+        owner: { id: 'u-owner', name: 'Owner' },
+      },
+      membership: {
+        id: 'mem-1',
+        role: Role.OWNER,
+        scopes: { view_medications: true, view_notes: true },
+      },
+    });
+
+    const req = new NextRequest('http://localhost:3000/api/profiles/prof-1');
+    const res = await getProfileRoute(req, { params: Promise.resolve({ id: 'prof-1' }) });
+    const profileJson = await res.json();
+    assertNoSecrets(profileJson);
+
+    (prisma.careNote.findMany as any).mockResolvedValue([
+      {
+        id: 'note-1',
+        body: 'Notes',
+        authorMembership: {
+          id: 'mem-1',
+          user: { id: 'u-1', name: 'Joy' },
+        },
+      },
+    ]);
+    const notes = await getCareNotes('prof-1', 'u-owner');
+    assertNoSecrets(notes);
   });
 });

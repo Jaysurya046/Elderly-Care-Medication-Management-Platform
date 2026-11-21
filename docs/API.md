@@ -22,14 +22,14 @@ Returns profile details, current user role, and active scope grants.
         "dateOfBirth": "1952-04-14",
         "timezone": "Asia/Kolkata",
         "bloodType": "O+",
-        "allergies": "Penicillin, Sulfa drugs",
-        "emergencyCode": "EMRG8821"
+        "allergies": "Penicillin, Sulfa drugs"
       },
       "userRole": "CAREGIVER",
       "scopes": { "view_medications": true, "manage_medications": true }
     }
   }
   ```
+  *(Note: `emergencyCode` is sensitive and returned strictly when `userRole` is `OWNER`; omitted for all other roles).*
 
 #### `PATCH /api/profiles/:id`
 Updates care profile details.

@@ -162,11 +162,12 @@ describe('Phase 2: Auth, Access Guard, Invitations & Passcodes', () => {
         profileId: 'prof-1',
         userId: 'user-1',
         passcodeHash,
+        status: 'ACTIVE',
         passcodeFailures: 4, // 5th failure incoming
         passcodeLockedUntil: null,
       });
 
-      const result = await verifyMemberPasscode('mem-1', '9999'); // wrong PIN
+      const result = await verifyMemberPasscode('mem-1', '9999', 'user-1'); // wrong PIN
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('locked due to 5 consecutive failures');
@@ -187,11 +188,12 @@ describe('Phase 2: Auth, Access Guard, Invitations & Passcodes', () => {
         profileId: 'prof-1',
         userId: 'user-1',
         passcodeHash,
+        status: 'ACTIVE',
         passcodeFailures: 3,
         passcodeLockedUntil: null,
       });
 
-      const result = await verifyMemberPasscode('mem-1', '1234'); // correct PIN
+      const result = await verifyMemberPasscode('mem-1', '1234', 'user-1'); // correct PIN
 
       expect(result.success).toBe(true);
       expect(prisma.membership.update).toHaveBeenCalledWith({

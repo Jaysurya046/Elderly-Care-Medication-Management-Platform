@@ -63,7 +63,7 @@ jobs:
         run: pnpm db:generate
 
       - name: Deploy Database Migrations
-        run: pnpm --filter @elder-care/db exec prisma migrate deploy --schema=prisma/schema.prisma
+        run: pnpm db:migrate
 
       - name: Verify Migration Drift
         run: pnpm --filter @elder-care/db exec prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-url "$DATABASE_URL" --exit-code

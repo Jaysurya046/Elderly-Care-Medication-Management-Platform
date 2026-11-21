@@ -54,3 +54,31 @@ This document records architectural, technical, and domain decisions made throug
 - **Context**: Regulatory and privacy compliance for sensitive health information.
 - **Decision**: `AuditLog` table is append-only. No application queries may delete or alter audit logs. Sensitive actions (profile access, health data reads, dose records, appointment changes, emergency views, exports) create audit logs with hashed IP and actor metadata. Never include passwords, passcodes, or health payload values in audit logs or API responses.
 - **Rationale**: Mandated by Section 1 (Principles 2 & 3) and Section 8.
+
+### DEC-008: Custom Database Sessions vs Auth.js v5
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Authentication architecture and immediate session revocation.
+- **Decision**: Implemented opaque database sessions stored in PostgreSQL with 32-byte cryptographically secure random session tokens and httpOnly cookies, instead of Auth.js v5.
+- **Rationale**: Direct database sessions guarantee instant revocation on the next HTTP request without relying on stateless JWT expiry or complex OAuth adapter synchronization.
+
+### DEC-009: Strict Redis Rate Limiting with Test-Only In-Memory Fallback
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Brute force protection across distributed instances vs isolated unit/integration tests.
+- **Decision**: Production rate limiting requires Redis and fails closed (503) if Redis is unreachable; in-memory fallback is strictly restricted to automated unit test environments.
+- **Rationale**: Prevents silent degradation of brute force defenses in production multi-container deployments while keeping test runs isolated.
+
+### DEC-010: Worker Bundling via tsup with Inlined Workspace Packages
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Background worker execution in containerized environments.
+- **Decision**: Bundle `apps/worker` via `tsup` inlining internal monorepo packages (`@elder-care/core`, `@elder-care/db`, `@elder-care/email`) into `dist/index.js`.
+- **Rationale**: Eliminates runtime Node.js ESM module resolution errors (`ERR_MODULE_NOT_FOUND` and `.ts` extension mismatch) in production.
+
+### DEC-011: Prisma Migrations with Drift Detection in CI
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Database schema lifecycle and CI verification.
+- **Decision**: Replace `prisma db push` with committed SQL migrations under `packages/db/prisma/migrations/` and enforce a drift check in CI via `prisma migrate diff --exit-code`.
+- **Rationale**: Guarantees deterministic, traceable database schema evolution with automated drift prevention.

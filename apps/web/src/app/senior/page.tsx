@@ -187,7 +187,7 @@ export default function SeniorModePage() {
       {/* Header */}
       <header className="mb-8">
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2">
-          Today's Medicines
+          Today&apos;s Medicines
         </h1>
         <p className="text-xl text-slate-600">
           Hello Kamala. Here are your medicines for today.

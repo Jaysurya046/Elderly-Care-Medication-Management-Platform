@@ -28,7 +28,7 @@ export default function HomePage() {
             </div>
             <h2 className="text-2xl font-bold text-slate-900 mb-3">Senior Mode</h2>
             <p className="text-slate-600 text-lg mb-6 leading-relaxed">
-              Designed for ease and clarity. See today's medicines in large, easy-to-read blocks.
+              Designed for ease and clarity. See today&apos;s medicines in large, easy-to-read blocks.
               Tap once to confirm you took your dose, or listen to instructions read aloud.
             </p>
           </div>
@@ -85,7 +85,7 @@ export default function HomePage() {
       <footer className="mt-12 text-center text-sm text-slate-500 border-t pt-6">
         <p>
           <strong>Notice:</strong> This software is not a substitute for professional medical
-          advice, diagnosis, or treatment. Always follow your prescribing physician's
+          advice, diagnosis, or treatment. Always follow your prescribing physician&apos;s
           instructions.
         </p>
       </footer>

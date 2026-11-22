@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 2 (Real Authentication & Sessions) Completed and Verified*
+*Last updated: Phase 3 (Complete API Surface) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,9 +13,9 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **20 test files, 95 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
-| `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all 18 routes and edge middleware. |
-| `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.94 MB) in 245ms. |
+| `pnpm test` | ✅ PASS | **21 test files, 115 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
+| `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
 | `pnpm test:e2e` | ⚠️ Browser Ready | Downloaded Chromium binary via `playwright install chromium`. Ready for real-stack database E2E tests in Phase 7. |
 | **Migrations** | ✅ PASS | Committed initial migration `20261121000000_init`, append-only audit trigger `20261122000000_audit_log_append_only`, and password reset token table `20261122010000_password_reset_token`. CI runs `prisma migrate deploy` and `prisma migrate diff`. |
@@ -63,7 +63,25 @@ This document provides an honest, evidence-based assessment of the repository's 
 
 ---
 
-## 3. Checklist Status Against Goal.md (§13)
+## 4. Phase 3 Complete API Surface Controls Summary
+
+| Phase 3 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Care Circle Invite (`POST .../care-circle/invite`)** | ✅ Complete | Rejects OWNER role invitations, generates 7-day token, sends invitation email, returns 201 Created. |
+| **2. Care Circle Member Confirm (`POST .../care-circle/confirm`)** | ✅ Complete | OWNER-only confirmation of pending members and scopes, audits `CARE_CIRCLE:CONFIRM_MEMBERSHIP`, returns 200. |
+| **3. Care Circle Remove Member (`DELETE .../care-circle/[memberId]`)** | ✅ Complete | OWNER-only, rejects removing the last active OWNER with error, returns 204 No Content. |
+| **4. Medication Update (`PATCH .../medications/[medId]`)** | ✅ Complete | Scope `manage_medications` required; stock change logs `MEDICATION:STOCK_ADJUSTMENT`, returns 200. |
+| **5. Medication Soft-Delete (`DELETE .../medications/[medId]`)** | ✅ Complete | Scope `manage_medications` required; sets `isActive: false`, audits `MEDICATION:DELETE`, returns 204. |
+| **6. Appointments CRUD (`POST`, `GET .../appointments`)** | ✅ Complete | Scoped (`manage_appointments`, `view_appointments`). Date-range filtered; strictly filters out private items for callers lacking `view_private_items`. Returns 201/200. |
+| **7. Care Notes CRUD (`POST`, `GET .../care-notes`)** | ✅ Complete | Scoped (`write_notes`, `view_notes`). Audited as `CARE_NOTE:CREATE` and `HEALTH_DATA:READ`. Hides private notes from non-permitted members. Returns 201/200. |
+| **8. Doses Query (`GET .../doses`)** | ✅ Complete | Scoped (`view_medications`). Date-range and status queryable; returns dose list with schedule and actor history. |
+| **9. Dose Correction (`POST .../doses/[doseId]/correction`)** | ✅ Complete | OWNER/CAREGIVER only (`manage_medications`), requires non-empty reason, audited as `DOSE:CORRECTION`, returns 200. |
+| **10. Unified Activity Feed (`GET .../activity`)** | ✅ Complete | Aggregates doses, notes, appointments into chronological feed respecting privacy. Returns 200. |
+| **11. AST Security Route Guard on All Endpoints** | ✅ Complete | Every single exported HTTP method in every route handler calls `requireProfileAccess`, verified by AST static analysis suite. |
+
+---
+
+## 5. Checklist Status Against Goal.md (§13)
 
 | Checklist Item (§13) | Current Real Status | Evidence / Notes |
 |---|---|---|
@@ -79,5 +97,5 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **10. AI Human Confirmation & Disabled by Default** | ✅ Complete | AI flags default to false (`FEATURE_AI_ENABLED=false`). |
 | **11. Export & Deletion with Grace Period** | ⚠️ Partial | Route handlers exist; scheduled deletion background worker job in Phase 6. |
 | **12. WCAG 2.2 AA Axe & Keyboard Flow** | ⚠️ In Progress | Playwright browser installed; real-stack Axe test execution scheduled for Phase 7. |
-| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-014. |
+| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-016. |
 | **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, and test env vars. |

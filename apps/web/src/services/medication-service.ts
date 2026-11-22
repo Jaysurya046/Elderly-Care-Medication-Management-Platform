@@ -327,3 +327,174 @@ export async function recordDoseAction(
 
   return updatedDoseEvent;
 }
+
+export interface UpdateMedicationInput {
+  name?: string;
+  genericName?: string | null;
+  strength?: string;
+  form?: string;
+  instructions?: string | null;
+  criticality?: MedicationCriticality;
+  prescribedBy?: string | null;
+  stockCount?: number;
+  refillThreshold?: number;
+  isActive?: boolean;
+}
+
+export async function updateMedication(
+  profileId: string,
+  medicationId: string,
+  input: UpdateMedicationInput,
+  actorUserId?: string
+): Promise<Medication> {
+  const { membership } = await requireProfileAccess(profileId, {
+    scope: 'manage_medications',
+    userIdOverride: actorUserId,
+  });
+
+  const existing = await prisma.medication.findUnique({
+    where: { id: medicationId },
+  });
+
+  if (!existing || existing.profileId !== profileId) {
+    throw new NotFoundError('Medication not found in this profile.');
+  }
+
+  // If stockCount changed, record stock adjustment audit log
+  if (input.stockCount !== undefined && input.stockCount !== existing.stockCount) {
+    await recordAuditLog({
+      profileId,
+      actorUserId: membership.userId,
+      actorMembershipId: membership.id,
+      action: 'MEDICATION:STOCK_ADJUSTMENT',
+      entityType: 'Medication',
+      entityId: medicationId,
+      metadata: {
+        previousStock: existing.stockCount,
+        newStock: input.stockCount,
+        diff: input.stockCount - existing.stockCount,
+      },
+    });
+  }
+
+  const updated = await prisma.medication.update({
+    where: { id: medicationId },
+    data: {
+      name: input.name?.trim(),
+      genericName: input.genericName !== undefined ? (input.genericName?.trim() || null) : undefined,
+      strength: input.strength?.trim(),
+      form: input.form?.trim(),
+      instructions: input.instructions !== undefined ? (input.instructions?.trim() || null) : undefined,
+      criticality: input.criticality,
+      prescribedBy: input.prescribedBy !== undefined ? (input.prescribedBy?.trim() || null) : undefined,
+      stockCount: input.stockCount !== undefined ? Math.max(0, input.stockCount) : undefined,
+      refillThreshold: input.refillThreshold,
+      isActive: input.isActive,
+    },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'MEDICATION:UPDATE',
+    entityType: 'Medication',
+    entityId: medicationId,
+    metadata: { updatedFields: Object.keys(input) },
+  });
+
+  return updated;
+}
+
+export async function deleteMedication(
+  profileId: string,
+  medicationId: string,
+  actorUserId?: string
+): Promise<Medication> {
+  const { membership } = await requireProfileAccess(profileId, {
+    scope: 'manage_medications',
+    userIdOverride: actorUserId,
+  });
+
+  const existing = await prisma.medication.findUnique({
+    where: { id: medicationId },
+  });
+
+  if (!existing || existing.profileId !== profileId) {
+    throw new NotFoundError('Medication not found in this profile.');
+  }
+
+  const softDeleted = await prisma.medication.update({
+    where: { id: medicationId },
+    data: { isActive: false },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'MEDICATION:DELETE',
+    entityType: 'Medication',
+    entityId: medicationId,
+    metadata: { softDelete: true },
+  });
+
+  return softDeleted;
+}
+
+export async function getProfileDoses(
+  profileId: string,
+  options?: { startDate?: Date; endDate?: Date; status?: DoseStatus },
+  actorUserId?: string
+): Promise<DoseEvent[]> {
+  const { membership } = await requireProfileAccess(profileId, {
+    scope: 'view_medications',
+    userIdOverride: actorUserId,
+  });
+
+  const whereClause: any = { profileId };
+  if (options?.startDate || options?.endDate) {
+    whereClause.scheduledAt = {};
+    if (options.startDate) whereClause.scheduledAt.gte = options.startDate;
+    if (options.endDate) whereClause.scheduledAt.lte = options.endDate;
+  }
+  if (options?.status) {
+    whereClause.status = options.status;
+  }
+
+  const doses = await prisma.doseEvent.findMany({
+    where: whereClause,
+    include: {
+      schedule: {
+        include: {
+          medication: true,
+        },
+      },
+      actions: {
+        include: {
+          membership: {
+            include: {
+              user: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+    orderBy: { scheduledAt: 'asc' },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'HEALTH_DATA:READ',
+    entityType: 'DoseEvent',
+    entityId: profileId,
+    metadata: { count: doses.length },
+  });
+
+  return doses;
+}

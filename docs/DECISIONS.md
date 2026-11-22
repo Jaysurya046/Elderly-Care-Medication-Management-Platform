@@ -123,3 +123,20 @@ This document records architectural, technical, and domain decisions made throug
   6. Next.js Edge Middleware (`apps/web/src/middleware.ts`) protects routes (`/senior`, `/dashboard`, `/profiles/*`), redirecting unauthenticated users to `/login` while explicitly exempting emergency paths (`/emergency`, `/profiles/[id]/emergency`).
   7. Seed script (`packages/db/prisma/seed.ts`) guarded with `guardSeedExecution()`, failing immediately if executed under `NODE_ENV === 'production'`.
 - **Rationale**: Meets all Phase 2 requirements for robust, auditable user authentication and immediate session invalidation without token drift.
+
+### DEC-016: Complete API Surface and AST Security Enforcement (Phase 3)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: Completing all core REST API endpoints required by Goal.md with input validation, CSRF verification, audit logging, and AST route-guard compliance.
+- **Decision**:
+  1. Care Circle Invitation (`POST /api/profiles/[id]/care-circle/invite`): Rejects OWNER role invitations, generates 7-day token, sends invitation email, returns 201 Created.
+  2. Care Circle Member Confirmation (`POST /api/profiles/[id]/care-circle/confirm`): OWNER-only confirmation of pending members and scopes, audits `CARE_CIRCLE:CONFIRM_MEMBERSHIP`.
+  3. Care Circle Member Removal (`DELETE /api/profiles/[id]/care-circle/[memberId]`): OWNER-only, enforces business rule rejecting removal of the last active OWNER with error, returns 204 No Content.
+  4. Medication Management (`PATCH /api/profiles/[id]/medications/[medId]`, `DELETE /api/profiles/[id]/medications/[medId]`): Supports updating medication metadata, stock adjustments (audited with `MEDICATION:STOCK_ADJUSTMENT`), and soft delete via `isActive: false` (audited with `MEDICATION:DELETE`).
+  5. Appointments (`POST /api/profiles/[id]/appointments`, `GET /api/profiles/[id]/appointments`): Filterable by date range, strictly hides private appointments from users lacking `view_private_items`, returns 201/200.
+  6. Care Notes (`POST /api/profiles/[id]/care-notes`, `GET /api/profiles/[id]/care-notes`): Privacy-scoped notes, audited as `CARE_NOTE:CREATE` and `HEALTH_DATA:READ`.
+  7. Doses Query (`GET /api/profiles/[id]/doses`): Filterable by date range and status, returns full schedule and actor metadata.
+  8. Dose Correction (`POST /api/profiles/[id]/doses/[doseId]/correction`): Allows OWNER/CAREGIVER to correct recorded doses with mandatory reason, audited as `DOSE:CORRECTION`.
+  9. Activity Feed (`GET /api/profiles/[id]/activity`): Unified chronological stream aggregating dose events, care notes, and appointments, respecting privacy visibility.
+  10. Every exported HTTP method across all routes directly invokes `requireProfileAccess`, verified by TypeScript AST static analysis.
+- **Rationale**: Full compliance with Section 4, 6, 8, 9, and Phase 3 API specifications.

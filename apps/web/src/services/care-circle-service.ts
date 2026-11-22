@@ -241,8 +241,13 @@ export async function revokeCareCircleMembership(
     throw new Error('Membership not found in this profile.');
   }
 
-  if (target.role === Role.OWNER && target.userId === actorMembership.userId) {
-    throw new Error('An owner cannot revoke their own membership. Transfer ownership first.');
+  if (target.role === Role.OWNER) {
+    const ownerCount = await prisma.membership.count({
+      where: { profileId, role: Role.OWNER, status: MembershipStatus.ACTIVE },
+    });
+    if (ownerCount <= 1) {
+      throw new Error('Cannot remove the last owner of the profile.');
+    }
   }
 
   const revoked = await prisma.membership.update({

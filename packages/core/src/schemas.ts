@@ -93,6 +93,47 @@ export const setPasscodeSchema = z.object({
   passcode: z.string().regex(/^\d{4,6}$/, 'Passcode must be between 4 and 6 digits'),
 });
 
+export const confirmCareCircleMemberSchema = z.object({
+  membershipId: z.string().min(1, 'Membership ID is required'),
+  confirmedScopes: z.record(z.string(), z.boolean()).optional(),
+});
+
+export const updateMedicationSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  genericName: z.string().max(200).nullable().optional(),
+  strength: z.string().min(1).max(100).optional(),
+  form: z.string().min(1).max(100).optional(),
+  instructions: z.string().max(1000).nullable().optional(),
+  criticality: z.enum(['STANDARD', 'CRITICAL']).optional(),
+  prescribedBy: z.string().max(200).nullable().optional(),
+  stockCount: z.number().int().min(0, 'Stock count cannot be negative').optional(),
+  refillThreshold: z.number().int().min(0).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const createAppointmentSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+  doctorName: z.string().min(1, 'Doctor name is required').max(200),
+  specialty: z.string().max(200).optional(),
+  clinicName: z.string().max(200).optional(),
+  address: z.string().max(500).optional(),
+  scheduledAt: z.union([z.string(), z.date()]).optional(),
+  startsAt: z.union([z.string(), z.date()]).optional(),
+  travelMinutes: z.number().int().min(0).default(0),
+  isPrivate: z.boolean().default(false),
+  notes: z.string().max(2000).optional(),
+  questionsToAsk: z.string().max(2000).optional(),
+  reminderOffsetsMinutes: z.array(z.number().int()).optional(),
+}).refine((data) => Boolean(data.scheduledAt || data.startsAt), {
+  message: 'Either scheduledAt or startsAt is required',
+  path: ['scheduledAt'],
+});
+
+export const doseCorrectionSchema = z.object({
+  targetStatus: z.enum(['TAKEN', 'LATE_TAKEN', 'SKIPPED', 'MISSED', 'PENDING']),
+  reason: z.string().min(1, 'Reason is required for dose correction').max(1000),
+});
+
 export function formatZodError(error: z.ZodError): Record<string, string> {
   const formatted: Record<string, string> = {};
   for (const issue of error.issues) {

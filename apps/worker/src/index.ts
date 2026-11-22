@@ -6,6 +6,9 @@ import { processDoseGeneration } from './jobs/dose-generator.job';
 import { processDoseReminders } from './jobs/dose-reminders.job';
 import { processCriticalEscalations } from './jobs/critical-escalation.job';
 import { processLowStockAlerts } from './jobs/low-stock.job';
+import { processAppointmentReminders } from './jobs/appointment-reminders.job';
+import { processScheduledDeletions } from './jobs/scheduled-deletion.job';
+import { processAutoMissDoses } from './jobs/auto-miss.job';
 
 const logger = pino({
   name: 'eldercare-worker',
@@ -75,6 +78,36 @@ export async function registerRepeatableJobs() {
     }
   );
 
+  // 5. Scan Appointment Reminders (Every 15 minutes)
+  await reminderQueue.add(
+    'scan-appointment-reminders',
+    {},
+    {
+      repeat: { pattern: '*/15 * * * *' },
+      jobId: 'scan-appointment-reminders-repeat',
+    }
+  );
+
+  // 6. Scan Auto-Miss Doses (Every minute)
+  await reminderQueue.add(
+    'scan-auto-miss',
+    {},
+    {
+      repeat: { pattern: '* * * * *' },
+      jobId: 'scan-auto-miss-repeat',
+    }
+  );
+
+  // 7. Process Scheduled Deletions (Daily at 03:00 UTC)
+  await reminderQueue.add(
+    'process-scheduled-deletions',
+    {},
+    {
+      repeat: { pattern: '0 3 * * *' },
+      jobId: 'process-scheduled-deletions-repeat',
+    }
+  );
+
   logger.info('Repeatable cron schedules successfully registered.');
 }
 
@@ -111,6 +144,24 @@ export function startWorker() {
           return { alerts };
         }
 
+        case 'scan-appointment-reminders': {
+          const sent = await processAppointmentReminders();
+          logger.info({ sent }, 'Processed appointment reminders');
+          return { sent };
+        }
+
+        case 'scan-auto-miss': {
+          const missed = await processAutoMissDoses();
+          logger.info({ missed }, 'Processed auto-miss doses');
+          return { missed };
+        }
+
+        case 'process-scheduled-deletions': {
+          const deleted = await processScheduledDeletions();
+          logger.info({ deleted }, 'Processed scheduled account deletions');
+          return { deleted };
+        }
+
         default:
           logger.warn({ jobName: job.name }, 'Unknown job name');
       }
@@ -129,7 +180,27 @@ export function startWorker() {
   return worker;
 }
 
+export function setupGracefulShutdown(worker: Worker, redisClient: Redis) {
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'Received termination signal, gracefully shutting down worker...');
+    try {
+      await worker.close();
+      await redisClient.quit();
+      logger.info('Worker and Redis connection closed cleanly.');
+      process.exit(0);
+    } catch (err: any) {
+      logger.error({ err }, 'Error during worker graceful shutdown');
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  return shutdown;
+}
+
 if (process.env.NODE_ENV !== 'test') {
   registerRepeatableJobs().catch((err) => logger.error({ err }, 'Failed to register repeatable jobs'));
-  startWorker();
+  const worker = startWorker();
+  setupGracefulShutdown(worker, connection);
 }

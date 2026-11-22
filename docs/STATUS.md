@@ -81,7 +81,20 @@ This document provides an honest, evidence-based assessment of the repository's 
 
 ---
 
-## 5. Checklist Status Against Goal.md (§13)
+## 5. Phase 4 Background Worker Controls Summary
+
+| Phase 4 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Dose Reminders & Escalation** | ✅ Complete | Evaluates quiet hours, notification channels (email/push/SMS), and escalates missed doses to primary caregivers. |
+| **2. Auto-Miss Conditional Transition** | ✅ Complete | Bounded batch scanner (`take: 100`) updating expired pending/snoozed doses past grace window with conditional `updateMany({ status: 'MISSED' })` and creating `DoseEventAction`. |
+| **3. Low Stock Alerts & Privacy** | ✅ Complete | Threshold check against `refillThresholdCount`; respects `emailShowsMedicineNames` hiding medicine names by default. |
+| **4. Appointment Reminders Job** | ✅ Complete | Evaluates configured offset windows (`reminderOffsetsMinutes: [10080, 1440, 120]`), deduplicates via `referenceKey`, dispatches notifications. |
+| **5. Scheduled Deletion Job** | ✅ Complete | Cascades deletion for profiles where `deletionRequestedAt <= now - 30 days`, logging `DATA:DELETE` audit event. |
+| **6. Production Worker Build & Graceful Shutdown** | ✅ Complete | Packaged via `tsup` into production ESM bundle (`dist/index.js`), clean `SIGTERM`/`SIGINT` handler with `worker.close()` and `connection.quit()`. |
+
+---
+
+## 6. Checklist Status Against Goal.md (§13)
 
 | Checklist Item (§13) | Current Real Status | Evidence / Notes |
 |---|---|---|
@@ -89,13 +102,13 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **2. Caregiver Invited & Scoped** | ✅ Complete | Invitations atomic, OWNER role rejected, pending confirmations workflow implemented, email sent. |
 | **3. Instant Revocation** | ✅ Complete | `requireProfileAccess` queries DB on every request. AST static and runtime tests assert 403 immediate rejection. |
 | **4. Private Items Hidden** | ✅ Complete | Service and DB filter on `isPrivate: false` unless caller has `view_private_items` scope or is OWNER. |
-| **5. Timezone & Quiet Hours Reminders** | ⚠️ Partial | Pure scheduling logic implemented; full integration with BullMQ/Mailpit scheduled for Phase 4. |
+| **5. Timezone & Quiet Hours Reminders** | ✅ Complete | Pure scheduling logic and BullMQ worker job implemented, tested in `phase4-worker-jobs.test.ts`. |
 | **6. Low-Stock & Email Privacy** | ✅ Complete | Respects `emailShowsMedicineNames` across templates and worker alerts; defaults to generic message hiding medicine names. |
 | **7. Atomic Stock Decrement & Zero Floor** | ✅ Complete | Conditional single-transaction `updateMany` with `{ gt: 0 }` and `{ decrement: 1 }` in `recordDoseAction`. Real concurrency suite in `concurrency-real-db.test.ts` and unit verified in `phase1a-dose-security.test.ts`. |
 | **8. Append-Only Audit Log** | ✅ Complete | Database trigger `enforce_audit_logs_append_only()` raises on `UPDATE` or `DELETE`; privileges revoked from PUBLIC. |
 | **9. AST Security Route Guard** | ✅ Complete | TypeScript AST traversal asserts `requireProfileAccess` call in every exported HTTP method. |
 | **10. AI Human Confirmation & Disabled by Default** | ✅ Complete | AI flags default to false (`FEATURE_AI_ENABLED=false`). |
-| **11. Export & Deletion with Grace Period** | ⚠️ Partial | Route handlers exist; scheduled deletion background worker job in Phase 6. |
+| **11. Export & Deletion with Grace Period** | ⚠️ Partial | Route handlers exist; scheduled deletion worker job complete; export endpoint serialization in Phase 6. |
 | **12. WCAG 2.2 AA Axe & Keyboard Flow** | ⚠️ In Progress | Playwright browser installed; real-stack Axe test execution scheduled for Phase 7. |
-| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-016. |
+| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-017. |
 | **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, and test env vars. |

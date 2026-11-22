@@ -140,3 +140,19 @@ This document records architectural, technical, and domain decisions made throug
   9. Activity Feed (`GET /api/profiles/[id]/activity`): Unified chronological stream aggregating dose events, care notes, and appointments, respecting privacy visibility.
   10. Every exported HTTP method across all routes directly invokes `requireProfileAccess`, verified by TypeScript AST static analysis.
 - **Rationale**: Full compliance with Section 4, 6, 8, 9, and Phase 3 API specifications.
+
+### DEC-017: Background Worker Architecture, Jobs & Graceful Shutdown (Phase 4)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: Reliable, scheduled, and idempotent background processing for medication dose generation, dose reminders, escalation, auto-miss transitions, stock alerts, appointment reminders, and GDPR/health data scheduled deletions.
+- **Decision**:
+  1. Built background worker service powered by BullMQ and Redis connection pool (`apps/worker`), packaged cleanly via `tsup` targeting Node 22 ESM (`dist/index.js`).
+  2. Implemented 5 key asynchronous job processors:
+     - `dose-generation`: Generates daily scheduled doses idempotently using composite keys (`profileId:medicationId:date`).
+     - `dose-reminders`: Evaluates quiet hours, notification channels (email/push/SMS), and escalates missed doses to primary caregivers.
+     - `auto-miss`: Bounded batch scanner (`take: 100`) executing atomic conditional state transitions (`updateMany({ where: { status: { in: ['PENDING', 'SNOOZED'] } } })`) to mark expired doses as `MISSED` with explicit `DoseEventAction` tracking.
+     - `appointment-reminders`: Evaluates multi-window reminder offsets (7 days, 24 hours, 2 hours), tracks deduplicated alerts via `referenceKey`, and dispatches emails respecting privacy settings.
+     - `scheduled-deletion`: Enforces data lifecycle deletion for profiles where `deletionRequestedAt <= now - 30 days`, cascades profile deletion, and records `DATA:DELETE` audit event.
+  3. Worker registers repeat cron schedules and implements robust graceful shutdown on `SIGTERM` and `SIGINT`, awaiting job completion via `worker.close()` and closing the Redis connection cleanly before exiting.
+- **Rationale**: Fulfills Phase 4 mandates and Sections 5, 8, 10, and 13 of Goal.md.
+

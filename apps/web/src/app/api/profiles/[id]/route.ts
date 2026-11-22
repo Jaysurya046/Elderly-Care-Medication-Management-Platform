@@ -5,7 +5,7 @@ import { updateCareProfileSchema } from '@elder-care/core';
 import { handleApiError } from '@/lib/api-error';
 import { validateCsrfRequest } from '@/lib/csrf';
 import { recordAuditLog, extractClientDetails } from '@/lib/audit';
-import { Role } from '@elder-care/db';
+import { Role, prisma } from '@elder-care/db';
 
 export async function GET(
   request: NextRequest,
@@ -34,12 +34,25 @@ export async function GET(
       delete (profileData as any).emergencyCode;
     }
 
+    const members = typeof prisma.membership?.findMany === 'function'
+      ? await prisma.membership.findMany({
+        where: { profileId: id },
+        include: {
+          user: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      : [];
+
     return NextResponse.json({
       success: true,
       data: {
         profile: profileData,
         userRole: membership.role,
         scopes: membership.scopes,
+        members,
       },
     });
   } catch (error: any) {

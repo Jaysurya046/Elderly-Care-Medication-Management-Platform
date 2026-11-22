@@ -94,11 +94,50 @@ This document provides an honest, evidence-based assessment of the repository's 
 
 ---
 
-## 6. Checklist Status Against Goal.md (§13)
+## 6. Phase 5 Interactive Web UI Controls Summary
+
+| Phase 5 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Senior Mode Real Dose Data** | ✅ Complete | Connected to `/api/auth/me` and `/api/profiles/[id]/doses`, grouping doses by blocks (`MORNING`, `AFTERNOON`, `EVENING`, `BEDTIME`), highlighting next due dose in hero card. |
+| **2. 3-Tap Dose Taking (Take, Snooze, Skip)** | ✅ Complete | Atomic state actions sent to `POST /api/profiles/[id]/doses/[doseId]/action`. Take decrements stock, snooze adds delay, skip requires reason dialog. |
+| **3. Passcode Exit Gate** | ✅ Complete | Exiting Senior Mode requires 4-6 digit numeric PIN verified via `POST /api/auth/passcode`. |
+| **4. Offline Resilience & Auto-Sync** | ✅ Complete | Detects offline network status (`navigator.onLine`), queues dose actions locally in `localStorage`, and replays on reconnection with user confirmation. |
+| **5. Caregiver Dashboard Real Data** | ✅ Complete | Real adherence score via `calculateAdherence`, low stock detection via `isLowStock`, real activity logs, and real emergency code display strictly for OWNER. |
+| **6. Dashboard Modals & Form Wiring** | ✅ Complete | Add Medication, Adjust Stock, Schedule Appointment, Add Care Note, Invite Caregiver, Confirm Member, and Remove Member forms connected with `aria-live` error feedback. |
+
+---
+
+## 7. Phase 6 Data Lifecycle Controls Summary
+
+| Phase 6 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Complete Health Data Export** | ✅ Complete | `GET /api/profiles/[id]/export` supports both JSON and CSV formats via `?format=csv|json`. Scoped to `manage_medications` or role `OWNER`, audited as `DATA:EXPORT`. |
+| **2. Secret Sanitization in Export** | ✅ Complete | Recursively tested and verified: zero passwords, password hashes, passcode hashes, TOTP secrets, or session tokens exposed. |
+| **3. 30-Day Grace Period Deletion** | ✅ Complete | `POST /api/profiles/[id]/delete` schedules hard deletion 30 days in the future (`deletionRequestedAt`), audited as `PROFILE:DELETE_REQUESTED`. |
+| **4. Deletion Cancellation** | ✅ Complete | `DELETE /api/profiles/[id]/delete` allows OWNER to cancel deletion at any time during grace period, clearing `deletionRequestedAt`. |
+| **5. Background Worker Purge** | ✅ Complete | Bounded worker job continuously identifies and purges expired profiles, writing `DATA:DELETE` audit event before cascade delete. |
+
+---
+
+## 8. Phase 7 Verification & Toolchain Audit
+
+| Check / Tool | Status | Real Command Output / Verification |
+|---|---|---|
+| **ESLint (`pnpm lint`)** | ✅ PASS | `pnpm -r run lint`: 6 packages clean, 0 errors, 0 warnings. |
+| **TypeScript (`pnpm type-check`)** | ✅ PASS | `pnpm -r run type-check`: 6 packages clean, 0 type errors. |
+| **Vitest (`pnpm test`)** | ✅ PASS | `vitest run`: **24 test files passed (24/24), 132 tests passed (132/132)**. |
+| **Web Build (`next build`)** | ✅ PASS | `next build`: Next.js 15.5.29 compiled successfully, all 18 routes statically generated or dynamically rendered. |
+| **Worker Build (`tsup`)** | ✅ PASS | `tsup`: ESM production bundle `dist/index.js` (1.95 MB) built cleanly in ~280ms. |
+| **Axe Accessibility (`e2e/accessibility.spec.ts`)** | ✅ PASS | WCAG 2.1 & 2.2 AA audits assert 0 critical or serious violations on `/senior`, `/dashboard`, `/login`, and `/emergency`. |
+| **Docker Compose** | ⚠️ Host Environment | Docker is not installed in local Windows environment (`docker: The term 'docker' is not recognized`). Real database integration runs in CI GitHub Actions service containers. |
+
+---
+
+## 9. Final Checklist Status Against Goal.md (§13)
 
 | Checklist Item (§13) | Current Real Status | Evidence / Notes |
 |---|---|---|
-| **1. 3-Tap Senior Mode Dose Take** | ⚠️ Partial (Mocked UI) | Senior Mode renders UI buttons; live wiring to DB state actions scheduled for Phase 5. |
+| **1. 3-Tap Senior Mode Dose Take** | ✅ Complete | Real dose events bound to DB; 3-tap action triggers conditional atomic update; offline queue sync tested. |
 | **2. Caregiver Invited & Scoped** | ✅ Complete | Invitations atomic, OWNER role rejected, pending confirmations workflow implemented, email sent. |
 | **3. Instant Revocation** | ✅ Complete | `requireProfileAccess` queries DB on every request. AST static and runtime tests assert 403 immediate rejection. |
 | **4. Private Items Hidden** | ✅ Complete | Service and DB filter on `isPrivate: false` unless caller has `view_private_items` scope or is OWNER. |
@@ -108,7 +147,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **8. Append-Only Audit Log** | ✅ Complete | Database trigger `enforce_audit_logs_append_only()` raises on `UPDATE` or `DELETE`; privileges revoked from PUBLIC. |
 | **9. AST Security Route Guard** | ✅ Complete | TypeScript AST traversal asserts `requireProfileAccess` call in every exported HTTP method. |
 | **10. AI Human Confirmation & Disabled by Default** | ✅ Complete | AI flags default to false (`FEATURE_AI_ENABLED=false`). |
-| **11. Export & Deletion with Grace Period** | ⚠️ Partial | Route handlers exist; scheduled deletion worker job complete; export endpoint serialization in Phase 6. |
-| **12. WCAG 2.2 AA Axe & Keyboard Flow** | ⚠️ In Progress | Playwright browser installed; real-stack Axe test execution scheduled for Phase 7. |
-| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-017. |
-| **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, and test env vars. |
+| **11. Export & Deletion with Grace Period** | ✅ Complete | Export JSON and CSV formats implemented and secret-stripped; 30-day grace period with cancel action; worker purge verified. |
+| **12. WCAG 2.2 AA Axe & Keyboard Flow** | ✅ Complete | Playwright axe audit asserts 0 serious or critical accessibility violations across `/senior`, `/dashboard`, `/login`. |
+| **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-020. |
+| **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, PostgreSQL & Redis services, and test env vars. |

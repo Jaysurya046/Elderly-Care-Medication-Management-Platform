@@ -96,7 +96,7 @@ describe('Phase 6 Data Lifecycle & Export (Section 8)', () => {
         { id: 'med-1', name: 'Telmisartan', strength: '40 mg', form: 'Tablet', stockCount: 28, refillThreshold: 7, schedules: [] },
       ] as any);
       vi.mocked(prisma.appointment.findMany).mockResolvedValue([
-        { id: 'appt-1', title: 'Cardiology Review', doctorName: 'Dr. Anand Kulkarni', scheduledAt: new Date() },
+        { id: 'appt-1', title: 'Cardiology Review', doctorName: 'Dr. Anand Kulkarni', startsAt: new Date(), scheduledAt: new Date() },
       ] as any);
       vi.mocked(prisma.careNote.findMany).mockResolvedValue([
         { id: 'note-1', body: 'Blood sugar was 114 mg/dL', createdAt: new Date() },
@@ -134,7 +134,7 @@ describe('Phase 6 Data Lifecycle & Export (Section 8)', () => {
         { id: 'med-1', name: 'Telmisartan', strength: '40 mg', form: 'Tablet', stockCount: 28, refillThreshold: 7, criticality: 'CRITICAL', schedules: [] },
       ] as any);
       vi.mocked(prisma.appointment.findMany).mockResolvedValue([
-        { id: 'appt-1', title: 'Cardiology Review', doctorName: 'Dr. Anand Kulkarni', clinicName: 'Ruby Hall OPD', scheduledAt: new Date('2026-11-25T10:00:00Z'), travelMinutes: 30, questionsToAsk: 'Review HbA1c' },
+        { id: 'appt-1', title: 'Cardiology Review', doctorName: 'Dr. Anand Kulkarni', clinicName: 'Ruby Hall OPD', startsAt: new Date('2026-11-25T10:00:00Z'), scheduledAt: new Date('2026-11-25T10:00:00Z'), travelMinutes: 30, questionsToAsk: 'Review HbA1c' },
       ] as any);
       vi.mocked(prisma.careNote.findMany).mockResolvedValue([
         { id: 'note-1', body: 'Blood sugar was 114 mg/dL', createdAt: new Date('2026-11-22T08:30:00Z') },

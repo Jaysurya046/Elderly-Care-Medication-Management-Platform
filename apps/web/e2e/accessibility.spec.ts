@@ -64,4 +64,18 @@ test.describe('WCAG 2.2 AA Accessibility Audits', () => {
 
     expect(criticalOrSerious).toEqual([]);
   });
+
+  test('Login page has zero critical or serious accessibility violations', async ({ page }) => {
+    await page.goto('/login');
+
+    const accessibilityScanResults = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+
+    const criticalOrSerious = accessibilityScanResults.violations.filter(
+      (v) => v.impact === 'critical' || v.impact === 'serious'
+    );
+
+    expect(criticalOrSerious).toEqual([]);
+  });
 });

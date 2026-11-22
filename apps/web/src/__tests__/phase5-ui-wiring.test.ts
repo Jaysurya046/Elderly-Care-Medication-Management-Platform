@@ -78,7 +78,7 @@ describe('Phase 5 UI Wiring & Business Logic', () => {
           role: Role.OWNER,
           status: 'ACTIVE',
           scopes: ['manage_medications', 'view_medications'],
-          careProfile: {
+          profile: {
             id: 'profile-1',
             elderName: 'Kamala Devi',
             dateOfBirth: new Date('1950-01-01'),
@@ -121,7 +121,7 @@ describe('Phase 5 UI Wiring & Business Logic', () => {
           role: Role.CAREGIVER,
           status: 'ACTIVE',
           scopes: ['manage_medications', 'view_medications'],
-          careProfile: {
+          profile: {
             id: 'profile-1',
             elderName: 'Kamala Devi',
             dateOfBirth: new Date('1950-01-01'),

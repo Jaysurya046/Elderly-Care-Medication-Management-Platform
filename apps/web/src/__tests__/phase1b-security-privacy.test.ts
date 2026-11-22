@@ -21,6 +21,7 @@ vi.mock('@elder-care/db', () => {
     membership: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
     },
     careNote: {

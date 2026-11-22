@@ -167,3 +167,28 @@ export async function requestProfileDeletion(
 
   return gracePeriodEnd;
 }
+
+export async function cancelProfileDeletion(
+  profileId: string,
+  actorUserId?: string
+): Promise<void> {
+  const { membership } = await requireProfileAccess(profileId, {
+    role: Role.OWNER,
+    userIdOverride: actorUserId,
+  });
+
+  await prisma.careProfile.update({
+    where: { id: profileId },
+    data: { deletionRequestedAt: null },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'PROFILE:UPDATE',
+    entityType: 'CareProfile',
+    entityId: profileId,
+    metadata: { action: 'CANCEL_DELETION' },
+  });
+}

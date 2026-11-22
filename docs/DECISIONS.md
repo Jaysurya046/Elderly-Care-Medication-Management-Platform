@@ -156,3 +156,43 @@ This document records architectural, technical, and domain decisions made throug
   3. Worker registers repeat cron schedules and implements robust graceful shutdown on `SIGTERM` and `SIGINT`, awaiting job completion via `worker.close()` and closing the Redis connection cleanly before exiting.
 - **Rationale**: Fulfills Phase 4 mandates and Sections 5, 8, 10, and 13 of Goal.md.
 
+### DEC-018: Interactive Web UI Wiring, Offline Queue, and Passcode Exit Gate (Phase 5)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: Replacing static mockups with real data-bound interactions in Senior Mode and the Caregiver Dashboard.
+- **Decision**:
+  1. Senior Mode (`apps/web/src/app/senior/page.tsx`):
+     - Fetches active profile and doses for today from real endpoints (`/api/auth/me` and `/api/profiles/[id]/doses`).
+     - Implements 3-tap action: `TAKE` (decrements stock, transitions to TAKEN), `SNOOZE` (increments snooze count), and `SKIP` (prompts mandatory reason, transitions to SKIPPED).
+     - Protects exit to Caregiver Dashboard via Passcode verification modal against `POST /api/auth/passcode`.
+     - Detects offline connectivity (`navigator.onLine`), presents prominent warning banner, saves pending actions to local queue, and automatically synchronizes when connection returns.
+     - Live screen reader updates announced via `aria-live="polite"` and `aria-live="assertive"`.
+  2. Caregiver Dashboard (`apps/web/src/app/dashboard/page.tsx`):
+     - Displays real adherence score using `@elder-care/core` calculation (`calculateAdherence`).
+     - Detects low stock items with visual warning banner and "View Stock" shortcut.
+     - Fully wired modal forms for adding medications, updating stock count, scheduling appointments, writing care notes, inviting caregivers, and confirming pending members.
+     - Enforces emergency code privacy: displayed strictly for role OWNER; masked with a security note for other roles.
+- **Rationale**: Eliminates all UI stubs and delivers fully interactive, accessible, and resilient client interfaces adhering to Section 7 & 13 of Goal.md.
+
+### DEC-019: Data Lifecycle: JSON/CSV Export, 30-Day Grace Deletion, and Worker Purge (Phase 6)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: GDPR and Indian DPDP 2023 compliance for complete personal data export and self-service account deletion with grace periods.
+- **Decision**:
+  1. Complete export endpoint (`GET /api/profiles/[id]/export`) supporting both JSON and CSV formats via `?format=csv|json`. Requires `manage_medications` scope or role `OWNER`. Audited as `DATA:EXPORT`. Strips passwords, passcodes, and secrets.
+  2. Scheduled deletion flow (`POST /api/profiles/[id]/delete`) sets a 30-day grace period timestamp (`deletionRequestedAt`), audited as `PROFILE:DELETE_REQUESTED`.
+  3. Deletion cancellation (`DELETE /api/profiles/[id]/delete`) allows the OWNER to reverse scheduled deletion at any time during the 30-day grace period, clearing `deletionRequestedAt`.
+  4. Background worker job (`scheduled-deletion.job.ts`) continuously purges profiles whose grace period has expired, writing a final `DATA:DELETE` audit event before permanent cascade delete.
+- **Rationale**: Guarantees full data sovereignty, data portability, and right-to-be-forgotten compliance without accidental data loss.
+
+### DEC-020: Playwright E2E Axe Testing and Real Database CI Environment (Phase 7)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: End-to-end verification, WCAG 2.2 AA accessibility compliance, and real database concurrency testing.
+- **Decision**:
+  1. Playwright test suite (`apps/web/e2e/accessibility.spec.ts`) runs automated axe accessibility audits against `/senior`, `/dashboard`, and `/login`, asserting 0 serious or critical accessibility violations across WCAG 2.1 and WCAG 2.2 AA rules.
+  2. Real database and Redis service containers are run in GitHub Actions CI workflow, executing real concurrency assertions, auth lifecycle, and database migrations.
+  3. Local test environment without Docker gracefully skips live DB concurrency tests while keeping unit and mock verification strictly green.
+- **Rationale**: Adheres to the core ground rule: "Evidence over claims". Every test and status entry reflects real executed commands.
+
+

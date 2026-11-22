@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 export type AuditAction =
   | 'AUTH:LOGIN'
   | 'AUTH:LOGOUT'
@@ -40,8 +38,19 @@ export function sanitizeIpAddress(ip?: string | null): string {
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
     return '127.0.0.1';
   }
-  // Hash remote IP with sha256 to anonymize
-  return createHash('sha256').update(ip).digest('hex').substring(0, 16);
+  // Deterministic 16-hex char hash without node:crypto dependency so it is browser-safe
+  let hash1 = 0xdeadbeef;
+  let hash2 = 0x41c6ce57;
+  for (let i = 0; i < ip.length; i++) {
+    const ch = ip.charCodeAt(i);
+    hash1 = Math.imul(hash1 ^ ch, 2654435761);
+    hash2 = Math.imul(hash2 ^ ch, 1597334677);
+  }
+  hash1 = Math.imul(hash1 ^ (hash1 >>> 16), 2246822507) ^ Math.imul(hash2 ^ (hash2 >>> 13), 3266489909);
+  hash2 = Math.imul(hash2 ^ (hash2 >>> 16), 2246822507) ^ Math.imul(hash1 ^ (hash1 >>> 13), 3266489909);
+  const hex1 = (hash1 >>> 0).toString(16).padStart(8, '0');
+  const hex2 = (hash2 >>> 0).toString(16).padStart(8, '0');
+  return (hex1 + hex2).substring(0, 16);
 }
 
 /**

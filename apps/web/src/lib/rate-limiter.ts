@@ -15,7 +15,7 @@ function getRedisClient(): Redis | null {
       retryStrategy: () => null, // Don't infinite retry if Redis is down
     });
     redisClient.connect().catch(() => {
-      // Redis connection error; fallback to memory store
+      // Redis connection error
       redisClient = null;
     });
     return redisClient;
@@ -28,19 +28,20 @@ export interface RateLimitResult {
   success: boolean;
   remaining: number;
   resetSeconds: number;
+  error?: string;
 }
 
 /**
  * Checks rate limit for a specific key (e.g. `login:user@example.com` or `passcode:membershipId`).
- * @param key unique identifier
- * @param maxAttempts maximum attempts allowed within window
- * @param windowSeconds time window in seconds
+ * Fails closed in production if Redis is unavailable (503 Service Unavailable).
+ * In-memory fallback is restricted strictly to non-production environments (tests/dev).
  */
 export async function checkRateLimit(
   key: string,
   maxAttempts: number = 5,
   windowSeconds: number = 900 // 15 minutes default
 ): Promise<RateLimitResult> {
+  const isProduction = process.env.NODE_ENV === 'production';
   const client = getRedisClient();
 
   if (client && client.status === 'ready') {
@@ -57,11 +58,28 @@ export async function checkRateLimit(
         resetSeconds: ttl > 0 ? ttl : windowSeconds,
       };
     } catch {
-      // Fallback to memory store if Redis operation fails
+      if (isProduction) {
+        return {
+          success: false,
+          remaining: 0,
+          resetSeconds: windowSeconds,
+          error: 'Rate limiting service temporarily unavailable. Please try again later.',
+        };
+      }
     }
   }
 
-  // In-memory fallback
+  // If in production and Redis is not ready/available, FAIL CLOSED
+  if (isProduction) {
+    return {
+      success: false,
+      remaining: 0,
+      resetSeconds: windowSeconds,
+      error: 'Rate limiting service temporarily unavailable. Please try again later.',
+    };
+  }
+
+  // In-memory fallback for development and testing ONLY
   const now = Date.now();
   const entry = memoryStore.get(key);
 

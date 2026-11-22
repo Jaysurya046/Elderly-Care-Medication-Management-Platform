@@ -3,6 +3,9 @@ import { DEFAULT_ROLE_SCOPES, Scopes } from '@elder-care/core';
 import { generateRandomToken, hashToken } from '../lib/crypto';
 import { requireProfileAccess } from '../lib/auth-guard';
 import { recordAuditLog } from '../lib/audit';
+import { sendEmail } from '../lib/email';
+import { CaregiverInvitationEmail } from '@elder-care/email';
+import React from 'react';
 
 export interface CreateInvitationInput {
   email: string;
@@ -15,7 +18,12 @@ export async function createCareCircleInvitation(
   input: CreateInvitationInput,
   actorUserId?: string
 ): Promise<{ invitation: Invitation; rawToken: string }> {
-  const { membership } = await requireProfileAccess(profileId, {
+  // Reject role: OWNER invitations
+  if (input.role === Role.OWNER) {
+    throw new Error('Cannot invite a member with role OWNER. Transfer ownership instead.');
+  }
+
+  const { membership, profile } = await requireProfileAccess(profileId, {
     role: Role.OWNER,
     userIdOverride: actorUserId,
   });
@@ -40,6 +48,20 @@ export async function createCareCircleInvitation(
       tokenHash,
       expiresAt,
     },
+  });
+
+  // Actually send the invitation email using the existing template
+  const appBaseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+  const invitationUrl = `${appBaseUrl}/invite/accept?token=${rawToken}`;
+  await sendEmail({
+    to: normalizedEmail,
+    subject: `Invitation to join ${profile.displayName}'s Care Circle`,
+    template: React.createElement(CaregiverInvitationEmail, {
+      elderName: profile.displayName,
+      role: input.role,
+      invitationUrl,
+      expiresInDays: 7,
+    }),
   });
 
   await recordAuditLog({
@@ -91,7 +113,17 @@ export async function acceptCareCircleInvitation(
     );
   }
 
-  // Create or activate membership
+  // Make acceptance atomic with invitation.updateMany and check count
+  const updateRes = await prisma.invitation.updateMany({
+    where: { id: invitation.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  if (updateRes.count !== 1) {
+    throw new Error('This invitation has already been used.');
+  }
+
+  // Membership stays INVITED until elder or an OWNER confirms role and scopes
   const membership = await prisma.membership.upsert({
     where: {
       profileId_userId: {
@@ -104,20 +136,14 @@ export async function acceptCareCircleInvitation(
       userId: user.id,
       role: invitation.role,
       scopes: invitation.scopes as any,
-      status: MembershipStatus.ACTIVE,
+      status: MembershipStatus.INVITED,
     },
     update: {
       role: invitation.role,
       scopes: invitation.scopes as any,
-      status: MembershipStatus.ACTIVE,
+      status: MembershipStatus.INVITED,
       revokedAt: null,
     },
-  });
-
-  // Mark invitation as used
-  await prisma.invitation.update({
-    where: { id: invitation.id },
-    data: { usedAt: new Date() },
   });
 
   await recordAuditLog({
@@ -127,10 +153,74 @@ export async function acceptCareCircleInvitation(
     action: 'CARE_CIRCLE:ACCEPT',
     entityType: 'Membership',
     entityId: membership.id,
-    metadata: { role: invitation.role },
+    metadata: { role: invitation.role, status: 'INVITED_PENDING_CONFIRMATION' },
   });
 
   return membership;
+}
+
+export async function getPendingCareCircleConfirmations(
+  profileId: string,
+  actorUserId?: string
+): Promise<Membership[]> {
+  await requireProfileAccess(profileId, {
+    role: Role.OWNER,
+    userIdOverride: actorUserId,
+  });
+
+  return prisma.membership.findMany({
+    where: {
+      profileId,
+      status: MembershipStatus.INVITED,
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+    },
+  });
+}
+
+export async function confirmCareCircleMember(
+  profileId: string,
+  targetMembershipId: string,
+  actorUserId?: string,
+  confirmedScopes?: Partial<Scopes>
+): Promise<Membership> {
+  const { membership: actorMembership } = await requireProfileAccess(profileId, {
+    role: Role.OWNER,
+    userIdOverride: actorUserId,
+  });
+
+  const target = await prisma.membership.findUnique({
+    where: { id: targetMembershipId },
+  });
+
+  if (!target || target.profileId !== profileId) {
+    throw new Error('Membership not found in this profile.');
+  }
+
+  const finalScopes = confirmedScopes
+    ? { ...((target.scopes || {}) as Record<string, boolean>), ...confirmedScopes }
+    : target.scopes;
+
+  const confirmed = await prisma.membership.update({
+    where: { id: targetMembershipId },
+    data: {
+      status: MembershipStatus.ACTIVE,
+      scopes: finalScopes as any,
+    },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: actorMembership.userId,
+    actorMembershipId: actorMembership.id,
+    action: 'CARE_CIRCLE:CONFIRM_MEMBERSHIP',
+    entityType: 'Membership',
+    entityId: targetMembershipId,
+    metadata: { role: target.role, scopes: finalScopes },
+  });
+
+  return confirmed;
 }
 
 export async function revokeCareCircleMembership(

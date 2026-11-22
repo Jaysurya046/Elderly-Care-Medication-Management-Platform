@@ -51,7 +51,7 @@ export async function getCareNotes(
   const scopes = (membership.scopes || {}) as Record<string, boolean>;
   const canViewPrivate = membership.role === Role.OWNER || Boolean(scopes.view_private_items);
 
-  return prisma.careNote.findMany({
+  const notes = await prisma.careNote.findMany({
     where: {
       profileId,
       ...(canViewPrivate ? {} : { isPrivate: false }),
@@ -67,6 +67,18 @@ export async function getCareNotes(
     },
     orderBy: { createdAt: 'desc' },
   });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'HEALTH_DATA:READ',
+    entityType: 'CareNote',
+    entityId: profileId,
+    metadata: { count: notes.length },
+  });
+
+  return notes;
 }
 
 export interface ActivityFeedItem {

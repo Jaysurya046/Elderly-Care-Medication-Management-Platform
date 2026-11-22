@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireProfileAccess } from '@/lib/auth-guard';
 import { prisma, Role } from '@elder-care/db';
-import { recordAuditLog } from '@/lib/audit';
+import { recordAuditLog, extractClientDetails } from '@/lib/audit';
+import { handleApiError } from '@/lib/api-error';
 
 export async function GET(
   request: NextRequest,
@@ -9,6 +10,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const { ip, userAgent } = extractClientDetails(request);
     // Exporting complete health bundle strictly requires OWNER role
     const { user, profile } = await requireProfileAccess(id, { role: Role.OWNER });
 
@@ -54,6 +56,8 @@ export async function GET(
       entityType: 'CareProfile',
       entityId: id,
       metadata: { itemsCount: medications.length + appointments.length + careNotes.length },
+      ip,
+      userAgent,
     });
 
     return new NextResponse(JSON.stringify(exportBundle, null, 2), {
@@ -64,9 +68,6 @@ export async function GET(
       },
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: error.statusCode || 500 }
-    );
+    return handleApiError(error, request);
   }
 }

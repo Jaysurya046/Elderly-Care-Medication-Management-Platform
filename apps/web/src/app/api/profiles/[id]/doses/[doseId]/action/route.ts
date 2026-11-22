@@ -2,14 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireProfileAccess } from '@/lib/auth-guard';
 import { recordDoseAction } from '@/services/medication-service';
 import { prisma } from '@elder-care/db';
+import { doseActionSchema } from '@elder-care/core';
+import { handleApiError } from '@/lib/api-error';
+import { validateCsrfRequest } from '@/lib/csrf';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; doseId: string }> }
 ) {
   try {
+    const csrf = validateCsrfRequest(request);
+    if (!csrf.valid) {
+      return NextResponse.json(
+        { success: false, error: csrf.error },
+        { status: csrf.status || 403 }
+      );
+    }
+
     const { id, doseId } = await params;
-    const body = await request.json();
+    const rawBody = await request.json();
+    const validatedData = doseActionSchema.parse(rawBody);
 
     // Verify dose belongs to profile before acting (return 404 otherwise)
     const dose = await prisma.doseEvent.findUnique({
@@ -26,22 +38,19 @@ export async function POST(
 
     // Derive required permission from the action
     const requiredScope =
-      body.action === 'TAKE' ||
-      body.action === 'SNOOZE' ||
-      body.action === 'SKIP' ||
-      body.action === 'CORRECTION'
+      validatedData.action === 'TAKE' ||
+      validatedData.action === 'SNOOZE' ||
+      validatedData.action === 'SKIP' ||
+      validatedData.action === 'CORRECTION'
         ? 'manage_medications'
         : 'view_medications';
 
-    await requireProfileAccess(id, { scope: requiredScope });
+    const { user } = await requireProfileAccess(id, { scope: requiredScope });
 
-    const updatedDose = await recordDoseAction(doseId, body, undefined, id);
+    const updatedDose = await recordDoseAction(doseId, validatedData, user.id, id);
 
     return NextResponse.json({ success: true, data: updatedDose });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: error.statusCode || 400 }
-    );
+    return handleApiError(error, request);
   }
 }

@@ -14,6 +14,19 @@ export interface WriteAuditLogParams {
 }
 
 /**
+ * Extracts client IP (supporting X-Forwarded-For and X-Real-IP) and User-Agent
+ * from an incoming HTTP request.
+ */
+export function extractClientDetails(request?: Request | null): { ip: string; userAgent: string | null } {
+  if (!request) return { ip: 'unknown', userAgent: null };
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  const realIp = request.headers.get('x-real-ip');
+  const rawIp = forwardedFor ? forwardedFor.split(',')[0].trim() : realIp || 'unknown';
+  const userAgent = request.headers.get('user-agent');
+  return { ip: rawIp, userAgent };
+}
+
+/**
  * Appends an audit log entry directly to the append-only AuditLog table.
  * Strictly sanitizes IP (anonymized/hashed) and metadata (no health values or passwords).
  */
@@ -36,7 +49,7 @@ export async function recordAuditLog(params: WriteAuditLogParams): Promise<void>
       },
     });
   } catch (error) {
-    // Audit logging should not crash the primary flow, but must log errors securely
+    // Audit logging failure is logged, but should not crash the primary flow
     console.error('CRITICAL: Failed to write audit log entry:', error);
   }
 }

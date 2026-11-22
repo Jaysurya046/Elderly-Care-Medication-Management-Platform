@@ -96,3 +96,16 @@ This document records architectural, technical, and domain decisions made throug
 - **Context**: Data minimization, emergency code exposure, and credential validation boundaries.
 - **Decision**: All Prisma queries including `user` must select strictly `{ id: true, name: true }`, ensuring `passwordHash`, `totpSecret`, and `passcodeHash` are never loaded or returned. `GET /api/profiles/[id]` strips `emergencyCode` for all non-OWNER callers. Removed the hardcoded fallback encryption key in `crypto.ts`, enforcing strict 32-byte hex validation. `verifyMemberPasscode` requires an authenticated session matching `membership.userId === user.id` with ACTIVE status, backed by Redis rate-limiting (5 attempts per 15 mins).
 - **Rationale**: Meets strict privacy, healthcare compliance, and anti-tamper requirements specified in Goal.md.
+
+### DEC-014: Invitations Atomicity, Fail-Closed Rate Limiting, CSRF, Audit Immutability, and AST Route Guards (Phase 1c)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: Authorization bypass prevention, brute-force mitigation, cross-site forgery defense, and database-level audit immutability.
+- **Decision**: 
+  1. Care Circle invitations reject `role: OWNER`. Acceptance is executed atomically via `invitation.updateMany({ where: { id, usedAt: null } })`. Membership remains in `INVITED` status until confirmed by an OWNER/elder via `confirmCareCircleMember`, triggering `CARE_CIRCLE:CONFIRM_MEMBERSHIP` audit log and sending notification email.
+  2. Rate limiting fails closed in production with a 503 error if Redis is unreachable; in-memory fallback is strictly restricted to test/development environments.
+  3. Enforced strict security headers (CSP, HSTS, X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy) and CSRF protection on all state-changing HTTP requests (`POST`, `PUT`, `PATCH`, `DELETE`) with origin/host verification.
+  4. Shared Zod schemas in `@elder-care/core` validate all API inputs with 400 field-level plain errors. Generic 500 error handler with Pino logging masks internal errors and returns opaque `requestId`.
+  5. Audit log immutability enforced at the database level via Postgres triggers rejecting `UPDATE` and `DELETE` on `"audit_logs"`, and revoking table mutation privileges from PUBLIC. Audit logs record client IP (via `x-forwarded-for`/`x-real-ip`) and user agent, auditing successful reads of health data.
+  6. Route guard verification strengthened using TypeScript AST traversal to verify that every exported HTTP method directly invokes `requireProfileAccess`.
+- **Rationale**: Direct compliance with Phase 1c security mandates and Section 4/8/9 of Goal.md.

@@ -232,6 +232,9 @@ importers:
       next:
         specifier: ^15.5.29
         version: 15.5.29(@playwright/test@1.65.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      nodemailer:
+        specifier: ^6.10.1
+        version: 6.10.1
       otpauth:
         specifier: ^9.3.6
         version: 9.6.0
@@ -244,6 +247,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.1(react@19.3.1)
+      resend:
+        specifier: ^4.8.0
+        version: 4.8.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       tailwind-merge:
         specifier: ^2.5.5
         version: 2.6.2
@@ -260,6 +266,9 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.5
+      '@types/nodemailer':
+        specifier: ^6.4.24
+        version: 6.4.24
       '@types/react':
         specifier: ^19.0.0
         version: 19.3.0

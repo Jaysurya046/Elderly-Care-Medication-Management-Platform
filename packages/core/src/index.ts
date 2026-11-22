@@ -5,3 +5,4 @@ export * from './adherence';
 export * from './schedules';
 export * from './reminders';
 export * from './audit';
+export * from './schemas';

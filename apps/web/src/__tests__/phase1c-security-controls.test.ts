@@ -6,7 +6,9 @@ import {
 } from '../services/care-circle-service';
 import { checkRateLimit } from '../lib/rate-limiter';
 import { validateCsrfRequest } from '../lib/csrf';
-import { sanitizeAuditMetadata } from '@elder-care/core';
+import { handleApiError } from '../lib/api-error';
+import { createMedicationSchema, formatZodError } from '@elder-care/core';
+import nextConfig from '../../next.config';
 import ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +36,8 @@ vi.mock('@elder-care/db', () => {
     },
     auditLog: {
       create: vi.fn().mockResolvedValue({ id: 'audit-1' }),
+      update: vi.fn().mockRejectedValue(new Error('Audit logs are strictly append-only. UPDATE and DELETE operations are forbidden.')),
+      delete: vi.fn().mockRejectedValue(new Error('Audit logs are strictly append-only. UPDATE and DELETE operations are forbidden.')),
     },
   };
   return {
@@ -129,15 +133,29 @@ describe('Phase 1c: Security Controls, Rate Limiting, CSRF, Audit & AST Guards (
         const result = await checkRateLimit('login:test@example.com', 5, 900);
         // In production without Redis, rate limit must fail closed
         expect(result.success).toBe(false);
+        expect(result.error).toBeDefined();
       } finally {
         (process.env as any).NODE_ENV = originalEnv;
         process.env.REDIS_URL = originalRedisUrl;
       }
     });
+
+    it('allows in-memory rate limiting in test/development environments', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        (process.env as any).NODE_ENV = 'test';
+        const key = `test-dev-${Date.now()}`;
+        const result = await checkRateLimit(key, 5, 60);
+        expect(result.success).toBe(true);
+        expect(result.remaining).toBe(4);
+      } finally {
+        (process.env as any).NODE_ENV = originalEnv;
+      }
+    });
   });
 
   // Item 13: CSRF & Security Headers
-  describe('Item 13: CSRF Protection on State-Changing Requests', () => {
+  describe('Item 13: CSRF Protection & Security Headers', () => {
     it('rejects cross-origin state-changing POST requests with 403 Forbidden', () => {
       const req = new Request('http://localhost:3000/api/profiles/p1/medications', {
         method: 'POST',
@@ -150,6 +168,98 @@ describe('Phase 1c: Security Controls, Rate Limiting, CSRF, Audit & AST Guards (
       const validation = validateCsrfRequest(req);
       expect(validation.valid).toBe(false);
       expect(validation.status).toBe(403);
+    });
+
+    it('allows same-origin state-changing POST requests', () => {
+      const req = new Request('http://localhost:3000/api/profiles/p1/medications', {
+        method: 'POST',
+        headers: {
+          origin: 'http://localhost:3000',
+          host: 'localhost:3000',
+        },
+      });
+
+      const validation = validateCsrfRequest(req);
+      expect(validation.valid).toBe(true);
+    });
+
+    it('verifies required security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options) in next.config.ts', async () => {
+      const headersConfig = await (nextConfig.headers ? nextConfig.headers() : []);
+      expect(headersConfig.length).toBeGreaterThan(0);
+
+      const rootHeaders = headersConfig[0].headers;
+      const headerKeys = rootHeaders.map((h: any) => h.key);
+
+      expect(headerKeys).toContain('Content-Security-Policy');
+      expect(headerKeys).toContain('Strict-Transport-Security');
+      expect(headerKeys).toContain('X-Content-Type-Options');
+      expect(headerKeys).toContain('X-Frame-Options');
+      expect(headerKeys).toContain('Referrer-Policy');
+
+      const csp = rootHeaders.find((h: any) => h.key === 'Content-Security-Policy');
+      expect(csp?.value).toContain("default-src 'self'");
+      expect(csp?.value).toContain("frame-ancestors 'none'");
+    });
+  });
+
+  // Item 14: Input Validation & Error Handling
+  describe('Item 14: Shared Zod Input Validation & Error Sanitization', () => {
+    it('returns field-level plain errors on invalid schema input', () => {
+      const result = createMedicationSchema.safeParse({
+        // Missing name, strength, form, timesOfDay
+        criticality: 'STANDARD',
+        stockCount: -5,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const formatted = formatZodError(result.error);
+        expect(formatted['name']).toBeDefined();
+        expect(formatted['strength']).toBeDefined();
+        expect(formatted['form']).toBeDefined();
+        expect(formatted['stockCount']).toMatch(/cannot be negative/i);
+      }
+    });
+
+    it('never leaks raw error messages on unexpected internal 500 errors', async () => {
+      const sensitiveError = new Error('Database connection failed at postgresql://postgres:super_secret_pw@db:5432');
+      const response = handleApiError(sensitiveError);
+
+      expect(response.status).toBe(500);
+      const json = await response.json();
+      expect(json.success).toBe(false);
+      expect(json.error).toBe('An unexpected internal error occurred. Please contact support.');
+      expect(json.requestId).toBeDefined();
+      expect(JSON.stringify(json)).not.toContain('super_secret_pw');
+      expect(JSON.stringify(json)).not.toContain('Database connection failed');
+    });
+  });
+
+  // Item 15: Audit Immutability Trigger
+  describe('Item 15: Database Append-Only Audit Trigger', () => {
+    it('verifies that migration SQL enforces BEFORE UPDATE and BEFORE DELETE triggers raising exception', () => {
+      const migrationPath = path.resolve(
+        __dirname,
+        '../../../../packages/db/prisma/migrations/20261122000000_audit_log_append_only/migration.sql'
+      );
+      expect(fs.existsSync(migrationPath)).toBe(true);
+
+      const sql = fs.readFileSync(migrationPath, 'utf-8');
+      expect(sql).toContain('CREATE OR REPLACE FUNCTION enforce_audit_logs_append_only()');
+      expect(sql).toContain('RAISE EXCEPTION');
+      expect(sql).toContain('BEFORE UPDATE ON "audit_logs"');
+      expect(sql).toContain('BEFORE DELETE ON "audit_logs"');
+      expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON "audit_logs" FROM PUBLIC');
+    });
+
+    it('rejects programmatic UPDATE and DELETE on audit logs', async () => {
+      await expect(
+        prisma.auditLog.update({ where: { id: 'audit-1' }, data: { action: 'DOSE:ACTION' } as any })
+      ).rejects.toThrow(/append-only/i);
+
+      await expect(
+        prisma.auditLog.delete({ where: { id: 'audit-1' } })
+      ).rejects.toThrow(/append-only/i);
     });
   });
 

@@ -73,13 +73,25 @@ export async function getAppointments(
   const canViewPrivate = membership.role === Role.OWNER || Boolean(scopes.view_private_items);
 
   // If user lacks view_private_items, strictly exclude private items from SQL query
-  return prisma.appointment.findMany({
+  const appointments = await prisma.appointment.findMany({
     where: {
       profileId,
       ...(canViewPrivate ? {} : { isPrivate: false }),
     },
     orderBy: { startsAt: 'asc' },
   });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: membership.userId,
+    actorMembershipId: membership.id,
+    action: 'HEALTH_DATA:READ',
+    entityType: 'Appointment',
+    entityId: profileId,
+    metadata: { count: appointments.length },
+  });
+
+  return appointments;
 }
 
 export interface AppointmentPrepView {

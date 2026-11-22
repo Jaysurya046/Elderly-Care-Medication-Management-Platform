@@ -83,6 +83,12 @@ export type ActionType =
   | 'manage:circle'
   | 'delete:profile';
 
+function checkScope(scopes: any, key: ScopeKey): boolean {
+  if (!scopes) return false;
+  if (Array.isArray(scopes)) return scopes.includes(key);
+  return Boolean(scopes[key]);
+}
+
 /**
  * Pure evaluation of permissions based on membership role, scopes, status, and item privacy.
  */
@@ -99,7 +105,7 @@ export function hasPermission(
   // Check private items barrier
   if (options?.isPrivateItem) {
     // Only permitted if membership explicitly has view_private_items
-    if (!membership.scopes.view_private_items && membership.role !== 'OWNER') {
+    if (!checkScope(membership.scopes, 'view_private_items') && membership.role !== 'OWNER') {
       return false;
     }
   }
@@ -117,20 +123,20 @@ export function hasPermission(
   // Scope check for specific actions
   switch (action) {
     case 'read:medications':
-      return Boolean(membership.scopes.view_medications);
+      return checkScope(membership.scopes, 'view_medications');
     case 'write:medications':
-      return Boolean(membership.scopes.manage_medications);
+      return checkScope(membership.scopes, 'manage_medications');
     case 'read:appointments':
-      return Boolean(membership.scopes.view_appointments);
+      return checkScope(membership.scopes, 'view_appointments');
     case 'write:appointments':
-      return Boolean(membership.scopes.manage_appointments);
+      return checkScope(membership.scopes, 'manage_appointments');
     case 'read:notes':
-      return Boolean(membership.scopes.view_notes);
+      return checkScope(membership.scopes, 'view_notes');
     case 'write:notes':
-      return Boolean(membership.scopes.write_notes);
+      return checkScope(membership.scopes, 'write_notes');
     case 'read:emergency_card':
       // Anyone with view_medications or EMERGENCY_VIEWER can read emergency card
-      return Boolean(membership.scopes.view_medications);
+      return checkScope(membership.scopes, 'view_medications');
     case 'manage:circle':
     case 'delete:profile':
       // Only OWNER can manage the circle invitations and delete profile

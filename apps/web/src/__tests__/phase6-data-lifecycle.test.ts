@@ -105,7 +105,7 @@ describe('Phase 6 Data Lifecycle & Export (Section 8)', () => {
         { id: 'mem-1', role: 'OWNER', scopes: {}, status: 'ACTIVE', createdAt: new Date() },
       ] as any);
 
-      const req = new NextRequest('http://localhost:3000/api/profiles/profile-1/export?format=json');
+      const req = new NextRequest('http://localhost:3000/api/profiles/profile-1/export?format=json&signature=valid&expires=9999999999');
       const res = await exportRoute(req, { params: Promise.resolve({ id: 'profile-1' }) });
       const rawText = await res.text();
       const bundle = JSON.parse(rawText);
@@ -141,7 +141,7 @@ describe('Phase 6 Data Lifecycle & Export (Section 8)', () => {
       ] as any);
       vi.mocked(prisma.membership.findMany).mockResolvedValue([] as any);
 
-      const req = new NextRequest('http://localhost:3000/api/profiles/profile-1/export?format=csv');
+      const req = new NextRequest('http://localhost:3000/api/profiles/profile-1/export?format=csv&signature=valid&expires=9999999999');
       const res = await exportRoute(req, { params: Promise.resolve({ id: 'profile-1' }) });
       const csvText = await res.text();
 

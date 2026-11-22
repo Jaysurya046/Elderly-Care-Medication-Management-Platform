@@ -471,9 +471,16 @@ export async function getProfileDoses(
         },
       },
       actions: {
-        include: {
+        select: {
+          id: true,
+          fromStatus: true,
+          toStatus: true,
+          reason: true,
+          createdAt: true,
           membership: {
-            include: {
+            select: {
+              id: true,
+              role: true,
               user: {
                 select: { id: true, name: true },
               },

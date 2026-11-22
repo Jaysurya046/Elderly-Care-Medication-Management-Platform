@@ -308,6 +308,9 @@ importers:
       '@elder-care/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@prisma/client':
+        specifier: ^6.4.1
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       '@react-email/render':
         specifier: ^1.0.4
         version: 1.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)

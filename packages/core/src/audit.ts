@@ -30,19 +30,38 @@ export type AuditAction =
   | 'DATA:DELETE';
 
 /**
- * Truncates / hashes client IP to comply with data minimization and GDPR/DPDP rules.
+ * Truncates and hashes client IP using HMAC-SHA256 with a server secret,
+ * truncated to 16 hex characters to comply with data minimization and GDPR/DPDP rules.
  */
-export function sanitizeIpAddress(ip?: string | null): string {
+export function sanitizeIpAddress(ip?: string | null, secret?: string): string {
   if (!ip) return 'unknown';
   // If localhost
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
     return '127.0.0.1';
   }
-  // Deterministic 16-hex char hash without node:crypto dependency so it is browser-safe
+
+  const key = secret || 'elder-care-audit-default-secret-salt-key-32b';
+
+  try {
+    // Dynamic access without static node:crypto import to prevent webpack client bundle breakage
+    const nodeCrypto =
+      typeof window === 'undefined' && typeof process !== 'undefined' && process.versions?.node
+        ? eval('require("node:crypto")')
+        : null;
+
+    if (nodeCrypto && typeof nodeCrypto.createHmac === 'function') {
+      return nodeCrypto.createHmac('sha256', key).update(ip).digest('hex').substring(0, 16);
+    }
+  } catch {
+    // Fallback if dynamic require fails
+  }
+
+  // Pure deterministic JS fallback hash when node crypto is absent
   let hash1 = 0xdeadbeef;
   let hash2 = 0x41c6ce57;
-  for (let i = 0; i < ip.length; i++) {
-    const ch = ip.charCodeAt(i);
+  const combined = `${ip}:${key}`;
+  for (let i = 0; i < combined.length; i++) {
+    const ch = combined.charCodeAt(i);
     hash1 = Math.imul(hash1 ^ ch, 2654435761);
     hash2 = Math.imul(hash2 ^ ch, 1597334677);
   }

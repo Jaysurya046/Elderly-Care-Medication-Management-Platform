@@ -136,7 +136,11 @@ export async function requireProfileAccess(
 
   // Check specific scope requirement
   if (options.scope) {
-    const hasScope = membership.role === Role.OWNER || Boolean(scopes[options.scope]);
+    const hasScope =
+      membership.role === Role.OWNER ||
+      (Array.isArray(membership.scopes)
+        ? membership.scopes.includes(options.scope)
+        : Boolean((membership.scopes as any)?.[options.scope]));
     if (!hasScope) {
       await recordAuditLog({
         profileId,
@@ -156,7 +160,11 @@ export async function requireProfileAccess(
 
   // Check private item barrier (Section 4 & 5)
   if (options.isPrivateItem) {
-    const canViewPrivate = membership.role === Role.OWNER || Boolean(scopes.view_private_items);
+    const canViewPrivate =
+      membership.role === Role.OWNER ||
+      (Array.isArray(membership.scopes)
+        ? membership.scopes.includes('view_private_items')
+        : Boolean((membership.scopes as any)?.view_private_items));
     if (!canViewPrivate) {
       await recordAuditLog({
         profileId,

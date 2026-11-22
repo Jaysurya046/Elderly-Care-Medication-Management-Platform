@@ -13,8 +13,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/profiles');
 
   // Emergency medical pathways are strictly exempted for emergency responders / offline card access
+  // Matches exactly /profiles/[id]/emergency (no nested sub-routes) and /api/emergency
   const isEmergencyPath =
-    pathname.includes('/emergency') ||
+    /^\/profiles\/[^/]+\/emergency$/.test(pathname) ||
     pathname.startsWith('/api/emergency');
 
   if (isProtectedPath && !isEmergencyPath) {

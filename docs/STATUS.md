@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 3 (Complete API Surface) Completed and Verified*
+*Last updated: Phase 8a (Leaks and Authorization Hardening) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,7 +13,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **21 test files, 115 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm test` | ✅ PASS | **26 test files, 151 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
 | `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
 | `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
@@ -151,3 +151,19 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **12. WCAG 2.2 AA Axe & Keyboard Flow** | ✅ Complete | Playwright axe audit asserts 0 serious or critical accessibility violations across `/senior`, `/dashboard`, `/login`. |
 | **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-020. |
 | **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, PostgreSQL & Redis services, and test env vars. |
+
+---
+
+## 10. Phase 8a Corrections: Leaks and Authorization Summary
+
+| Phase 8a Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Secret Scrubbing & Explicit Selects** | ✅ Complete | Applied explicit select on all membership, authorMembership, and actions queries; recursively verified across all API routes that no passwordHash, passcodeHash, totpSecret, or tokenHash appears in any response (`phase8a-secret-scrubbing.test.ts`). |
+| **2. Passcode Authorization & CSRF** | ✅ Complete | Setting passcode requires caller to be profile OWNER or the membership's own user with Zod schema validation; CSRF checks enforced on all state-changing `/api/auth/*` routes (`phase8a-leaks-authorization.test.ts`). |
+| **3. Signed Export Links & Formula Escaping** | ✅ Complete | Export restricted strictly to OWNER, requires 15-minute HMAC-signed token, escapes CSV formula injection (`=`, `+`, `-`, `@`, `\t`, `\r` prefixed with `'`), and respects `isPrivate` filter (`phase8a-leaks-authorization.test.ts`). |
+| **4. Reminder & Low-Stock Email Privacy** | ✅ Complete | Appointment reminders exclude private appointments for members without `view_private_items`, gate title and doctor behind `emailShowsMedicineNames`, and HTML-escape all interpolated text (`appointment-reminders.job.ts`, `low-stock.job.ts`). |
+| **5. GET /profiles/[id] Permission Matrix & Field Masking** | ✅ Complete | Guarded with `hasPermission` from `@elder-care/core`; strips `emergencyCode` and `deletionRequestedAt` for non-OWNER callers, and members list omits passcode hashes (`phase8a-leaks-authorization.test.ts`). |
+| **6. Emergency Card Server Component** | ✅ Complete | Converted to Next.js Server Component; verifies access (`view_medications` or valid emergency code) with no PHI on failure, queries real `EmergencyContact` records, records `EMERGENCY_CARD:VIEW` audit log, and fixes middleware exemption regex to match exactly `/profiles/[id]/emergency`. |
+| **7. Hashed Sessions at Rest & Metadata** | ✅ Complete | Session tokens are SHA-256 hashed at rest in PostgreSQL, capturing `ip` and `userAgent`, and displaying them in session listing (`auth-service.ts`, `session.ts`). |
+| **8. HMAC-Keyed IP Anonymization** | ✅ Complete | `sanitizeIpAddress` uses HMAC-SHA256 keyed with server secret (`AUDIT_HMAC_SECRET`), truncated to 16 hex characters; all routes pass real client IP and user agent to audit logs. |
+

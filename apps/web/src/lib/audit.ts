@@ -28,11 +28,13 @@ export function extractClientDetails(request?: Request | null): { ip: string; us
 
 /**
  * Appends an audit log entry directly to the append-only AuditLog table.
- * Strictly sanitizes IP (anonymized/hashed) and metadata (no health values or passwords).
+ * Strictly sanitizes IP (HMAC-SHA256 hashed with server secret, truncated to 16 chars)
+ * and metadata (no health values, passcodes, or passwords).
  */
 export async function recordAuditLog(params: WriteAuditLogParams): Promise<void> {
   try {
-    const sanitizedIp = sanitizeIpAddress(params.ip);
+    const serverSecret = process.env.AUDIT_HMAC_SECRET || process.env.APP_ENCRYPTION_KEY || 'elder-care-audit-server-secret-32b';
+    const sanitizedIp = sanitizeIpAddress(params.ip, serverSecret);
     const sanitizedMeta = sanitizeAuditMetadata(params.metadata);
 
     await prisma.auditLog.create({

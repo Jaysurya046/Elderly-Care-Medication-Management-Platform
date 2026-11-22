@@ -56,9 +56,18 @@ export async function getCareNotes(
       profileId,
       ...(canViewPrivate ? {} : { isPrivate: false }),
     },
-    include: {
+    select: {
+      id: true,
+      profileId: true,
+      authorMembershipId: true,
+      body: true,
+      isPrivate: true,
+      createdAt: true,
+      updatedAt: true,
       authorMembership: {
-        include: {
+        select: {
+          id: true,
+          role: true,
           user: {
             select: { id: true, name: true },
           },
@@ -119,7 +128,9 @@ export async function getActivityFeed(
         },
       },
       membership: {
-        include: {
+        select: {
+          id: true,
+          role: true,
           user: {
             select: { id: true, name: true },
           },
@@ -150,9 +161,18 @@ export async function getActivityFeed(
       profileId,
       ...(canViewPrivate ? {} : { isPrivate: false }),
     },
-    include: {
+    select: {
+      id: true,
+      profileId: true,
+      authorMembershipId: true,
+      body: true,
+      isPrivate: true,
+      createdAt: true,
+      updatedAt: true,
       authorMembership: {
-        include: {
+        select: {
+          id: true,
+          role: true,
           user: {
             select: { id: true, name: true },
           },

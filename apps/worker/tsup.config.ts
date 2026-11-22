@@ -6,4 +6,5 @@ export default defineConfig({
   target: 'node22',
   clean: true,
   noExternal: ['@elder-care/core', '@elder-care/db', '@elder-care/email'],
+  external: ['@prisma/client', '.prisma/client'],
 });

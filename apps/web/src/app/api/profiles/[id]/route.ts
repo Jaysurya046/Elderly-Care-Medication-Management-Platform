@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireProfileAccess } from '@/lib/auth-guard';
 import { updateCareProfile } from '@/services/profile-service';
-import { updateCareProfileSchema } from '@elder-care/core';
+import { updateCareProfileSchema, hasPermission } from '@elder-care/core';
 import { handleApiError } from '@/lib/api-error';
 import { validateCsrfRequest } from '@/lib/csrf';
 import { recordAuditLog, extractClientDetails } from '@/lib/audit';
@@ -16,6 +16,25 @@ export async function GET(
     const { ip, userAgent } = extractClientDetails(request);
     const { profile, membership, user } = await requireProfileAccess(id);
 
+    // Enforce permission matrix via hasPermission from packages/core
+    const canView =
+      membership.role === Role.OWNER ||
+      hasPermission(
+        {
+          role: membership.role as any,
+          scopes: (membership.scopes as any) || {},
+          status: (membership.status as any) || 'ACTIVE',
+        },
+        'read:medications'
+      );
+
+    if (!canView) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Insufficient permissions to view profile details.' },
+        { status: 403 }
+      );
+    }
+
     // Audit successful profile read (Section 8: Health Data Access Audit)
     await recordAuditLog({
       profileId: id,
@@ -28,16 +47,25 @@ export async function GET(
       userAgent,
     });
 
+    const isOwner = membership.role === Role.OWNER;
     const profileData = { ...profile };
-    // Emergency code exposure: return emergencyCode ONLY to OWNER
-    if (membership.role !== Role.OWNER) {
+
+    // Role-based field restrictions: non-owners must never see emergencyCode or deletion timing
+    if (!isOwner) {
       delete (profileData as any).emergencyCode;
+      delete (profileData as any).deletionRequestedAt;
     }
 
+    // Use explicit select to guarantee no passcodeHash or passcodeFailures are returned
     const members = typeof prisma.membership?.findMany === 'function'
       ? await prisma.membership.findMany({
         where: { profileId: id },
-        include: {
+        select: {
+          id: true,
+          role: true,
+          scopes: true,
+          status: true,
+          createdAt: true,
           user: {
             select: { id: true, name: true, email: true },
           },
@@ -74,13 +102,11 @@ export async function PATCH(
     }
 
     const { id } = await params;
-    // AST Route Guard requirement: every exported HTTP method directly calls requireProfileAccess
-    const { membership } = await requireProfileAccess(id, { role: Role.OWNER });
-
+    await requireProfileAccess(id, { role: Role.OWNER });
     const rawBody = await request.json();
     const validatedData = updateCareProfileSchema.parse(rawBody);
 
-    const updated = await updateCareProfile(id, validatedData, membership.userId);
+    const updated = await updateCareProfile(id, validatedData);
     return NextResponse.json({ success: true, data: updated });
   } catch (error: any) {
     return handleApiError(error, request);

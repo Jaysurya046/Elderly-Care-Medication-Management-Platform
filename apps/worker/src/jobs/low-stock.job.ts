@@ -3,6 +3,16 @@ import { sendEmail } from '../email-sender';
 import { LowStockAlertEmail } from '@elder-care/email';
 import React from 'react';
 
+function escapeHtml(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function processLowStockAlerts(referenceTime: Date = new Date()): Promise<number> {
   let alertsSent = 0;
 
@@ -52,14 +62,18 @@ export async function processLowStockAlerts(referenceTime: Date = new Date()): P
       if (recentLog) continue; // Already alerted within 48h
 
       const showMedicine = Boolean(med.profile.emailShowsMedicineNames);
+      const medName = escapeHtml(med.name);
+      const elderName = escapeHtml(med.profile.displayName);
+      const recipientName = escapeHtml(recipient.name);
+
       const subject = showMedicine
-        ? `Low Stock Alert: ${med.name} for ${med.profile.displayName}`
+        ? `Low Stock Alert: ${medName} for ${elderName}`
         : 'A refill is needed. Open the app to see which medicine.';
 
       const template = React.createElement(LowStockAlertEmail, {
-        caregiverName: recipient.name,
-        elderName: med.profile.displayName,
-        medicineName: `${med.name} (${med.strength})`,
+        caregiverName: recipientName,
+        elderName: elderName,
+        medicineName: `${medName} (${escapeHtml(med.strength)})`,
         showMedicineName: showMedicine,
         stockCount: med.stockCount,
         refillThreshold: med.refillThreshold,

@@ -195,4 +195,18 @@ This document records architectural, technical, and domain decisions made throug
   3. Local test environment without Docker gracefully skips live DB concurrency tests while keeping unit and mock verification strictly green.
 - **Rationale**: Adheres to the core ground rule: "Evidence over claims". Every test and status entry reflects real executed commands.
 
+### DEC-021: Leaks and Authorization Hardening (Phase 8a)
+- **Date**: 2026-11-23
+- **Status**: Accepted
+- **Context**: Closing credential leakage vectors, enforcing OWNER export restrictions with 15-minute signed links, preventing CSV formula injection, securing passcodes and auth endpoints with CSRF, protecting emergency cards as server components, and hashing sessions at rest.
+- **Decision**:
+  1. Explicit selects applied to all membership, authorMembership, and actions queries; secrets (`passwordHash`, `passcodeHash`, `totpSecret`, `tokenHash`) never appear in API responses.
+  2. Data export restricted strictly to OWNER, requiring a 15-minute HMAC-signed expiring link, and escaping spreadsheet formula injection characters (`=`, `+`, `-`, `@`, `\t`, `\r`).
+  3. CSRF checks enforced on all state-changing `/api/auth/*` routes; passcode updates restricted to profile OWNER or the membership's own user with Zod validation.
+  4. Client IP anonymization uses HMAC-SHA256 keyed with server secret (`AUDIT_HMAC_SECRET`), truncated to 16 characters.
+  5. Emergency card refactored to a Server Component with real DB queries, strict permission check (`view_medications` or emergency code), exact regex middleware exemption, and no PHI leakage on failure.
+  6. Session tokens stored strictly as SHA-256 hashes at rest in PostgreSQL, capturing `ip` and `userAgent`.
+- **Rationale**: Direct compliance with Phase 8a audit corrections.
+
+
 

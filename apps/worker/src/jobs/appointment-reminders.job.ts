@@ -2,6 +2,16 @@ import { prisma } from '@elder-care/db';
 import { sendEmail } from '../email-sender';
 import { format, toZonedTime } from 'date-fns-tz';
 
+function escapeHtml(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function processAppointmentReminders(referenceTime: Date = new Date()): Promise<number> {
   let remindersSent = 0;
 
@@ -47,8 +57,16 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
         continue;
       }
 
-      // Send to owner and active caregivers
-      for (const membership of appt.profile.memberships) {
+      // Filter recipients based on appointment privacy:
+      // If appointment is private, exclude members without view_private_items scope
+      const eligibleMembers = appt.profile.memberships.filter((m) => {
+        if (!appt.isPrivate) return true;
+        if (m.role === 'OWNER') return true;
+        const scopes = (m.scopes as any) || {};
+        return Array.isArray(scopes) ? scopes.includes('view_private_items') : Boolean(scopes.view_private_items);
+      });
+
+      for (const membership of eligibleMembers) {
         const recipient = membership.user;
         const refKey = `APPT_REMINDER_${appt.id}_${offset}_${recipient.id}`;
 
@@ -58,7 +76,19 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
 
         if (existingLog) continue;
 
-        const subject = `Upcoming Appointment: ${appt.title} for ${appt.profile.displayName}`;
+        const showDetails = appt.profile.emailShowsMedicineNames !== false;
+        const elderName = escapeHtml(appt.profile.displayName);
+        const apptTitle = escapeHtml(appt.title);
+        const doctorName = escapeHtml(appt.doctorName);
+        const locationName = escapeHtml(appt.clinicName || appt.address || 'Clinic');
+
+        const subject = showDetails
+          ? `Upcoming Appointment: ${apptTitle} for ${elderName}`
+          : `Upcoming Medical Appointment for ${elderName}`;
+
+        const textContent = showDetails
+          ? `Reminder: ${elderName} has an appointment "${apptTitle}" with ${doctorName} on ${formattedDate} at ${locationName}. View details: ${appBaseUrl}/dashboard/appointments`
+          : `Reminder: ${elderName} has an upcoming medical appointment scheduled on ${formattedDate}. Open the app to view doctor and location details: ${appBaseUrl}/dashboard/appointments`;
 
         const notifLog = await prisma.notificationLog.create({
           data: {
@@ -75,7 +105,7 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
         const sendResult = await sendEmail({
           to: recipient.email,
           subject,
-          text: `Reminder: ${appt.profile.displayName} has an appointment "${appt.title}" with ${appt.doctorName} on ${formattedDate} at ${appt.clinicName || appt.address || 'Clinic'}. View details: ${appBaseUrl}/dashboard/appointments`,
+          text: textContent,
         });
 
         await prisma.notificationLog.update({

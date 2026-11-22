@@ -390,6 +390,8 @@ export interface UserSessionView {
   id: string;
   createdAt: Date;
   expiresAt: Date;
+  ip?: string | null;
+  userAgent?: string | null;
   isCurrent: boolean;
 }
 
@@ -408,11 +410,15 @@ export async function listUserSessions(
     orderBy: { createdAt: 'desc' },
   });
 
+  const currentHashed = currentSessionId ? hashToken(currentSessionId) : null;
+
   return sessions.map((s) => ({
     id: s.id,
     createdAt: s.createdAt,
     expiresAt: s.expiresAt,
-    isCurrent: s.id === currentSessionId,
+    ip: s.ip,
+    userAgent: s.userAgent,
+    isCurrent: s.id === currentSessionId || s.id === currentHashed,
   }));
 }
 

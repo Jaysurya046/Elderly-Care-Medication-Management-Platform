@@ -98,15 +98,15 @@ describe('Phase 1b: Secrets Scrubbing, Privacy, Encryption Key & Passcode Sessio
     // Assert that findMany was called with user select: { id: true, name: true }
     expect(prisma.careNote.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        include: {
-          authorMembership: {
-            include: {
+        select: expect.objectContaining({
+          authorMembership: expect.objectContaining({
+            select: expect.objectContaining({
               user: {
                 select: { id: true, name: true },
               },
-            },
-          },
-        },
+            }),
+          }),
+        }),
       })
     );
   });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getCurrentSessionId } from '@/lib/session';
 import { listUserSessions, revokeAllUserSessions } from '@/services/auth-service';
 import { handleApiError } from '@/lib/api-error';
+import { validateCsrfRequest } from '@/lib/csrf';
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,6 +22,14 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const csrf = validateCsrfRequest(request);
+    if (!csrf.valid) {
+      return NextResponse.json(
+        { success: false, error: csrf.error },
+        { status: csrf.status || 403 }
+      );
+    }
+
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

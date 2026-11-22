@@ -3,13 +3,74 @@ import { requireProfileAccess } from '@/lib/auth-guard';
 import { prisma, Role } from '@elder-care/db';
 import { recordAuditLog, extractClientDetails } from '@/lib/audit';
 import { handleApiError } from '@/lib/api-error';
+import { validateCsrfRequest } from '@/lib/csrf';
+import { createSignedExportLink, verifySignedExportLink } from '@/lib/export-signed-link';
 
+/**
+ * Escapes CSV values and strictly neutralizes spreadsheet formula injection (CSV injection)
+ * by prefixing risky initial characters (=, +, -, @, \t, \r) with an apostrophe.
+ */
 function escapeCsv(val: any): string {
   if (val === null || val === undefined) return '';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
+  let str = String(val);
+  // Spreadsheet formula neutralization
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
 }
 
+/**
+ * POST /api/profiles/[id]/export
+ * Generates an authorized, time-limited (15-minute) signed export link.
+ * Strictly restricted to profile OWNER.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const csrf = validateCsrfRequest(request);
+    if (!csrf.valid) {
+      return NextResponse.json(
+        { success: false, error: csrf.error },
+        { status: csrf.status || 403 }
+      );
+    }
+
+    const { id } = await params;
+    const { membership } = await requireProfileAccess(id);
+
+    if (membership.role !== Role.OWNER) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Export generation is restricted strictly to profile OWNER.' },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const format = (body.format || 'json').toLowerCase();
+    const downloadUrl = createSignedExportLink(id, format, 900); // 15 minutes
+
+    return NextResponse.json({
+      success: true,
+      downloadUrl,
+      expiresInSeconds: 900,
+    });
+  } catch (error: any) {
+    return handleApiError(error, request);
+  }
+}
+
+/**
+ * GET /api/profiles/[id]/export
+ * Downloads the complete health data bundle.
+ * Requires:
+ * 1. Caller is OWNER role.
+ * 2. Valid, unexpired signed link token (15-minute expiry).
+ * 3. Applies isPrivate filters for delegates without view_private_items.
+ * 4. Escapes CSV formula characters.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,21 +80,61 @@ export async function GET(
     const { ip, userAgent } = extractClientDetails(request);
     const searchParams = request.nextUrl.searchParams;
     const format = (searchParams.get('format') || 'json').toLowerCase();
+    const signature = searchParams.get('signature');
+    const expires = searchParams.get('expires');
 
-    // Exporting health data requires manage_medications scope or OWNER role
-    const { user, profile } = await requireProfileAccess(id, { scope: 'manage_medications' });
+    // Exporting health data is restricted strictly to OWNER role (as per API.md and Goal.md)
+    const { user, profile, membership } = await requireProfileAccess(id);
+    if (membership.role !== Role.OWNER) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Health data export is restricted strictly to profile OWNER.' },
+        { status: 403 }
+      );
+    }
 
-    // Bundle everything the elder owns
+    // Must verify 15-minute signed token
+    if (!verifySignedExportLink(id, format, expires, signature)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: A valid, non-expired signed link is required to download health export data.' },
+        { status: 403 }
+      );
+    }
+
+    // Bundle everything the elder owns (with isPrivate filter respected)
+    const canViewPrivate =
+      membership.role === Role.OWNER ||
+      (Array.isArray(membership.scopes) && membership.scopes.includes('view_private_items')) ||
+      (membership.scopes as any)?.view_private_items === true;
+
     const [medications, appointments, careNotes, memberships] = await Promise.all([
       prisma.medication.findMany({
         where: { profileId: id },
         include: { schedules: { include: { doseEvents: true } } },
       }),
-      prisma.appointment.findMany({ where: { profileId: id } }),
-      prisma.careNote.findMany({ where: { profileId: id } }),
+      prisma.appointment.findMany({
+        where: {
+          profileId: id,
+          ...(canViewPrivate ? {} : { isPrivate: false }),
+        },
+      }),
+      prisma.careNote.findMany({
+        where: {
+          profileId: id,
+          ...(canViewPrivate ? {} : { isPrivate: false }),
+        },
+      }),
       prisma.membership.findMany({
         where: { profileId: id },
-        select: { id: true, role: true, scopes: true, status: true, createdAt: true },
+        select: {
+          id: true,
+          role: true,
+          scopes: true,
+          status: true,
+          createdAt: true,
+          user: {
+            select: { id: true, name: true, email: true },
+          },
+        },
       }),
     ]);
 
@@ -41,12 +142,13 @@ export async function GET(
     await recordAuditLog({
       profileId: id,
       actorUserId: user.id,
+      actorMembershipId: membership.id,
       action: 'DATA:EXPORT',
       entityType: 'CareProfile',
       entityId: id,
       metadata: {
         format,
-        itemsCount: medications.length + appointments.length + careNotes.length,
+        itemsCount: (medications?.length || 0) + (appointments?.length || 0) + (careNotes?.length || 0),
       },
       ip,
       userAgent,
@@ -88,7 +190,7 @@ export async function GET(
           .map(escapeCsv)
           .join(',')
       );
-      for (const m of medications) {
+      for (const m of medications || []) {
         lines.push(
           [
             m.name,
@@ -112,7 +214,7 @@ export async function GET(
           .map(escapeCsv)
           .join(',')
       );
-      for (const a of appointments) {
+      for (const a of appointments || []) {
         lines.push(
           [
             a.title,
@@ -131,7 +233,7 @@ export async function GET(
       // Section: Care Notes
       lines.push('=== Care Notes ===');
       lines.push(['Date', 'Body', 'Private'].map(escapeCsv).join(','));
-      for (const n of careNotes) {
+      for (const n of careNotes || []) {
         lines.push(
           [new Date(n.createdAt).toISOString(), n.body, n.isPrivate ? 'Yes' : 'No']
             .map(escapeCsv)

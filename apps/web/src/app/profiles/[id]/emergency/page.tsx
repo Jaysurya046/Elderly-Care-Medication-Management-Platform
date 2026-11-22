@@ -1,15 +1,144 @@
-'use client';
-
 import * as React from 'react';
-import { AlertTriangle, Printer, Phone, MapPin, Heart, Shield } from 'lucide-react';
-import { Button } from '@elder-care/ui';
+import { prisma, Role } from '@elder-care/db';
+import { getCurrentUser } from '@/lib/session';
+import { recordAuditLog } from '@/lib/audit';
+import { AlertTriangle, Phone, MapPin, Heart, Shield } from 'lucide-react';
+import { PrintButton } from './print-button';
 
-export default function EmergencyCardPage() {
-  const handlePrint = () => {
-    if (typeof window !== 'undefined') {
-      window.print();
+interface EmergencyCardPageProps {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ code?: string }>;
+}
+
+export default async function EmergencyCardPage({ params, searchParams }: EmergencyCardPageProps) {
+  const { id } = await params;
+  const { code } = await searchParams;
+
+  const currentUser = await getCurrentUser();
+
+  // Verify access:
+  // Option A: Active signed-in member with view_medications scope or OWNER/CAREGIVER
+  let hasAccess = false;
+  let actorUserId: string | null = null;
+  let actorMembershipId: string | null = null;
+
+  if (currentUser) {
+    const membership = await prisma.membership.findFirst({
+      where: {
+        profileId: id,
+        userId: currentUser.id,
+        status: 'ACTIVE',
+      },
+    });
+
+    if (membership) {
+      const isOwnerOrCaregiver = membership.role === Role.OWNER || membership.role === Role.CAREGIVER;
+      const scopes = (membership.scopes as any) || {};
+      const hasViewMedScope = Array.isArray(scopes)
+        ? scopes.includes('view_medications')
+        : Boolean(scopes.view_medications);
+
+      if (isOwnerOrCaregiver || hasViewMedScope) {
+        hasAccess = true;
+        actorUserId = currentUser.id;
+        actorMembershipId = membership.id;
+      }
     }
-  };
+  }
+
+  // Option B: Valid emergency code
+  if (!hasAccess && code) {
+    const targetProfile = await prisma.careProfile.findUnique({
+      where: { id },
+      select: { emergencyCode: true },
+    });
+
+    if (
+      targetProfile?.emergencyCode &&
+      targetProfile.emergencyCode.trim().toUpperCase() === code.trim().toUpperCase()
+    ) {
+      hasAccess = true;
+    }
+  }
+
+  // Access denied: render generic error without exposing ANY PHI
+  if (!hasAccess) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="p-8 bg-white rounded-3xl border-2 border-slate-200 shadow-lg">
+          <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 mb-2">Access Denied</h1>
+          <p className="text-slate-600 mb-6 text-sm">
+            Access to this emergency medical profile is protected. Please provide a valid emergency code or sign in with an authorized care circle account.
+          </p>
+          <form method="GET" action={`/profiles/${id}/emergency`} className="space-y-4">
+            <div>
+              <label htmlFor="code" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 text-left">
+                Emergency Code
+              </label>
+              <input
+                type="text"
+                id="code"
+                name="code"
+                placeholder="Enter 8-digit Emergency Code"
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl font-mono text-center tracking-widest text-lg uppercase focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-base shadow-sm transition-colors"
+            >
+              Verify & View Card
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Record mandatory Section 8 audit log
+  await recordAuditLog({
+    profileId: id,
+    actorUserId,
+    actorMembershipId,
+    action: 'EMERGENCY_CARD:VIEW',
+    entityType: 'CareProfile',
+    entityId: id,
+    metadata: { accessMethod: currentUser ? 'AUTHENTICATED_SESSION' : 'EMERGENCY_CODE' },
+  });
+
+  // Query real data from database
+  const profile = await prisma.careProfile.findUnique({
+    where: { id },
+  });
+
+  if (!profile) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <h1 className="text-2xl font-black text-slate-900">Record Not Found</h1>
+      </div>
+    );
+  }
+
+  const [emergencyContacts, medications] = await Promise.all([
+    prisma.emergencyContact.findMany({
+      where: { profileId: id },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    }),
+    prisma.medication.findMany({
+      where: { profileId: id, isActive: true },
+      include: { schedules: true },
+      orderBy: [{ criticality: 'desc' }, { name: 'asc' }],
+    }),
+  ]);
+
+  const birthDate = profile.dateOfBirth ? new Date(profile.dateOfBirth) : null;
+  const age = birthDate
+    ? Math.floor((Date.now() - birthDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -23,13 +152,7 @@ export default function EmergencyCardPage() {
             Keep a physical copy in the wallet, refrigerator, or bedside.
           </p>
         </div>
-        <button
-          onClick={handlePrint}
-          className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-lg min-h-[48px] flex items-center gap-2 shadow-sm transition-colors"
-        >
-          <Printer className="w-5 h-5" />
-          <span>Print Card</span>
-        </button>
+        <PrintButton />
       </div>
 
       {/* Printable Emergency Card Container */}
@@ -41,16 +164,19 @@ export default function EmergencyCardPage() {
               <AlertTriangle className="w-5 h-5 shrink-0" />
               EMERGENCY MEDICAL INFORMATION
             </div>
-            <h1 className="text-4xl font-black text-slate-900">Kamala Devi</h1>
-            <p className="text-lg font-bold text-slate-600 mt-1">
-              Date of Birth: April 14, 1952 (Age: 74)
-            </p>
+            <h1 className="text-4xl font-black text-slate-900">{profile.displayName}</h1>
+            {birthDate && (
+              <p className="text-lg font-bold text-slate-600 mt-1">
+                Date of Birth: {birthDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                {age !== null && ` (Age: ${age})`}
+              </p>
+            )}
           </div>
           <div className="text-right sm:border-l-4 sm:border-rose-200 sm:pl-6">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
               Blood Group
             </span>
-            <div className="text-4xl font-black text-rose-600">O POSITIVE (O+)</div>
+            <div className="text-4xl font-black text-rose-600">{profile.bloodType || 'NOT SPECIFIED'}</div>
           </div>
         </div>
 
@@ -62,7 +188,7 @@ export default function EmergencyCardPage() {
               ALLERGIES (DO NOT ADMINISTER)
             </span>
             <p className="text-2xl font-black text-rose-950 mt-2">
-              Penicillin, Sulfa drugs
+              {profile.allergies || 'No documented allergies'}
             </p>
           </div>
 
@@ -72,7 +198,7 @@ export default function EmergencyCardPage() {
               CHRONIC CONDITIONS
             </span>
             <p className="text-xl font-bold text-amber-950 mt-2">
-              Type 2 Diabetes, Hypertension, Osteoarthritis
+              {profile.conditions || 'None reported'}
             </p>
           </div>
         </div>
@@ -80,22 +206,45 @@ export default function EmergencyCardPage() {
         {/* Current Medications Table */}
         <div className="mb-8">
           <h2 className="text-2xl font-black text-slate-900 border-b-2 border-slate-300 pb-2 mb-4">
-            Current Daily Medications
+            Active Medications
           </h2>
-          <div className="space-y-3">
-            {[
-              { name: 'Telmisartan', strength: '40 mg', timing: 'Morning (08:00 AM)', purpose: 'Blood Pressure (CRITICAL)' },
-              { name: 'Metformin', strength: '500 mg', timing: 'Twice daily with meals', purpose: 'Type 2 Diabetes' },
-              { name: 'Shelcal 500', strength: '500 mg + D3', timing: 'Afternoon (01:00 PM)', purpose: 'Calcium & Bone Health' },
-            ].map((med, i) => (
-              <div key={i} className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50 flex items-center justify-between">
-                <div>
-                  <span className="text-xl font-black text-slate-900">{med.name} {med.strength}</span>
-                  <p className="text-base text-slate-600">{med.timing} • {med.purpose}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+          {medications.length === 0 ? (
+            <p className="text-slate-500 italic">No active medications registered.</p>
+          ) : (
+            <div className="space-y-3">
+              {medications.map((med) => {
+                const timings = med.schedules
+                  .flatMap((s) => (Array.isArray(s.timesOfDay) ? (s.timesOfDay as string[]) : []))
+                  .join(', ');
+                return (
+                  <div
+                    key={med.id}
+                    className={`p-4 rounded-xl border-2 flex items-center justify-between ${
+                      med.criticality === 'CRITICAL'
+                        ? 'border-rose-300 bg-rose-50/50'
+                        : 'border-slate-200 bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-black text-slate-900">
+                          {med.name} {med.strength}
+                        </span>
+                        {med.criticality === 'CRITICAL' && (
+                          <span className="px-2 py-0.5 rounded text-xs font-black bg-rose-600 text-white uppercase">
+                            Critical
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-base text-slate-600">
+                        {timings ? `Schedule: ${timings}` : med.instructions || 'Daily'} • {med.form}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Emergency Contacts & Hospital */}
@@ -103,11 +252,27 @@ export default function EmergencyCardPage() {
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-2 flex items-center gap-2">
               <Phone className="w-5 h-5 text-blue-600" />
-              Emergency Caregiver Contact
+              Emergency Caregiver Contacts
             </h3>
-            <p className="text-xl font-black text-slate-900">Rajesh Sharma (Son)</p>
-            <p className="text-lg font-bold text-blue-800">+91 98765 43210</p>
-            <p className="text-sm text-slate-500">Authorized primary health proxy</p>
+            {emergencyContacts.length === 0 ? (
+              <p className="text-slate-500 italic">No emergency contacts registered.</p>
+            ) : (
+              <div className="space-y-3">
+                {emergencyContacts.map((contact) => (
+                  <div key={contact.id}>
+                    <p className="text-xl font-black text-slate-900">
+                      {contact.name} ({contact.relationship})
+                      {contact.isPrimary && (
+                        <span className="ml-2 text-xs font-bold px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                          Primary
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-lg font-bold text-blue-800">{contact.phoneNumber}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
@@ -115,15 +280,18 @@ export default function EmergencyCardPage() {
               <MapPin className="w-5 h-5 text-rose-600" />
               Doctor & Hospital
             </h3>
-            <p className="text-lg font-black text-slate-900">Dr. Anand Kulkarni</p>
-            <p className="text-base font-bold text-slate-700">Ruby Hall Clinic, Pune</p>
-            <p className="text-sm text-slate-500">Emergency OPD: 020-66455100</p>
+            <p className="text-lg font-black text-slate-900">
+              {profile.primaryDoctorName || 'Not specified'}
+            </p>
+            <p className="text-base font-bold text-slate-700">
+              {profile.preferredHospital || 'Not specified'}
+            </p>
           </div>
         </div>
 
         {/* Footer with Verification Code */}
         <div className="mt-8 pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-          <span>Digital Record ID: EMRG8821 • Access verified by Elder Care Security Guard</span>
+          <span>Digital Record ID: {profile.id.slice(0, 8)} • Access verified by Elder Care Security</span>
           <span>Printed from eldercare.local • Subject to immediate profile revocation</span>
         </div>
       </div>

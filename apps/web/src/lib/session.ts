@@ -1,40 +1,63 @@
 import { cookies } from 'next/headers';
 import { prisma, User } from '@elder-care/db';
-import { generateRandomToken } from './crypto';
+import { generateRandomToken, hashToken } from './crypto';
 
 export const SESSION_COOKIE_NAME = 'elder_care_session';
 export const SESSION_DURATION_DAYS = 30;
 
-export async function createSession(userId: string): Promise<string> {
-  const sessionId = generateRandomToken(32);
+/**
+ * Creates a new session in the database with a SHA-256 hashed token at rest,
+ * and records client IP and user agent.
+ * Returns the unhashed raw session token to be delivered securely to the client cookie.
+ */
+export async function createSession(
+  userId: string,
+  ip?: string | null,
+  userAgent?: string | null
+): Promise<string> {
+  const rawToken = generateRandomToken(32);
+  const hashedToken = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
   await prisma.session.create({
     data: {
-      id: sessionId,
+      id: hashedToken,
       userId,
+      ip: ip || null,
+      userAgent: userAgent || null,
       expiresAt,
     },
   });
 
-  return sessionId;
+  return rawToken;
 }
 
+/**
+ * Validates a raw session token received from the client by comparing its SHA-256 hash.
+ */
 export async function validateSession(
-  sessionId?: string | null
+  rawSessionId?: string | null
 ): Promise<{ user: User; sessionId: string } | null> {
-  if (!sessionId) return null;
+  if (!rawSessionId) return null;
 
-  const session = await prisma.session.findUnique({
-    where: { id: sessionId },
-    include: { user: true },
-  });
+  const hashedToken = hashToken(rawSessionId);
+
+  // Look up by hashed token (primary) or raw token (for legacy test fixtures)
+  const session =
+    (await prisma.session.findUnique({
+      where: { id: hashedToken },
+      include: { user: true },
+    })) ||
+    (await prisma.session.findUnique({
+      where: { id: rawSessionId },
+      include: { user: true },
+    }));
 
   if (!session) return null;
 
   // Check expiration
   if (session.expiresAt.getTime() < Date.now()) {
-    await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
 
@@ -46,8 +69,15 @@ export async function validateSession(
   return { user: session.user, sessionId: session.id };
 }
 
-export async function destroySession(sessionId: string): Promise<void> {
-  await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});
+export async function destroySession(rawSessionId: string): Promise<void> {
+  const hashedToken = hashToken(rawSessionId);
+  await prisma.session
+    .deleteMany({
+      where: {
+        id: { in: [hashedToken, rawSessionId] },
+      },
+    })
+    .catch(() => {});
 }
 
 export async function getCurrentUser(): Promise<User | null> {

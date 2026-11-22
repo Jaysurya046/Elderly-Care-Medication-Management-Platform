@@ -68,9 +68,11 @@ model User {
 }
 
 model Session {
-  id        String   @id @default(uuid())
+  id        String   @id // Hashed session token (SHA-256) at rest
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip        String?
+  userAgent String?
   expiresAt DateTime @db.Timestamptz(6)
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
@@ -105,9 +107,25 @@ model CareProfile {
   careNotes               CareNote[]
   notificationLogs        NotificationLog[]
   auditLogs               AuditLog[]
+  emergencyContacts       EmergencyContact[]
 
   @@index([ownerId])
   @@map("care_profiles")
+}
+
+model EmergencyContact {
+  id           String      @id @default(uuid()) @db.Uuid
+  profileId    String      @db.Uuid
+  profile      CareProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name         String
+  relationship String
+  phoneNumber  String
+  isPrimary    Boolean     @default(false)
+  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @db.Timestamptz(6)
+
+  @@index([profileId])
+  @@map("emergency_contacts")
 }
 
 model Membership {

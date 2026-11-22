@@ -73,8 +73,14 @@ jobs:
       - name: TypeScript Type-Check
         run: pnpm type-check
 
+      - name: Lint Workspace
+        run: pnpm lint
+
       - name: Run Vitest Unit & Integration Suites
         run: pnpm test
 
-      - name: Build Core Domain Package
-        run: pnpm --filter @elder-care/core build
+      - name: Build All Packages
+        run: pnpm build
+
+      - name: Build Worker Service
+        run: pnpm --filter @elder-care/worker build

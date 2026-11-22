@@ -2,16 +2,28 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { ShieldCheck, KeyRound, Lock, Mail, AlertCircle } from 'lucide-react';
-import { Button } from '@elder-care/ui';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Lock, Mail, AlertCircle, KeyRound, ShieldCheck } from 'lucide-react';
 
 export default function LoginPage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-50"><p className="text-slate-600">Loading sign in...</p></div>}>
+      <LoginForm />
+    </React.Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get('redirect') || '/dashboard';
+
   const [authMode, setAuthMode] = React.useState<'password' | 'passcode'>('password');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [passcode, setPasscode] = React.useState('');
+  const [totpCode, setTotpCode] = React.useState('');
+  const [requiresTotp, setRequiresTotp] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
 
@@ -21,24 +33,47 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // For demo purpose, redirect to senior mode or dashboard directly
       if (authMode === 'passcode') {
         if (!/^\d{4,6}$/.test(passcode)) {
           setErrorMessage('PIN must be 4 to 6 numbers.');
           setIsLoading(false);
           return;
         }
+        // In Senior Mode quick PIN unlock, navigate to senior interface
         router.push('/senior');
-      } else {
-        if (!email || !password) {
-          setErrorMessage('Please fill in both email and password.');
+        return;
+      }
+
+      // Password + optional TOTP mode
+      const res = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          totpCode: requiresTotp ? totpCode.trim() : undefined,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        if (data.requiresTotp) {
+          setRequiresTotp(true);
+          setErrorMessage('Please enter your 6-digit two-factor authentication code.');
           setIsLoading(false);
           return;
         }
-        router.push('/dashboard');
+        setErrorMessage(data.error || data.message || 'Sign-in failed. Please check your credentials.');
+        setIsLoading(false);
+        return;
       }
+
+      // Successfully signed in with session cookie set by server
+      router.push(redirectUrl);
+      router.refresh();
     } catch {
-      setErrorMessage('Sign-in failed. Please check your credentials.');
+      setErrorMessage('A network error occurred. Please try again.');
       setIsLoading(false);
     }
   };
@@ -63,6 +98,7 @@ export default function LoginPage() {
             type="button"
             onClick={() => {
               setAuthMode('password');
+              setRequiresTotp(false);
               setErrorMessage('');
             }}
             className={`py-2.5 text-center font-bold text-base rounded-lg transition-colors min-h-[44px] ${
@@ -77,6 +113,7 @@ export default function LoginPage() {
             type="button"
             onClick={() => {
               setAuthMode('passcode');
+              setRequiresTotp(false);
               setErrorMessage('');
             }}
             className={`py-2.5 text-center font-bold text-base rounded-lg transition-colors min-h-[44px] ${
@@ -116,6 +153,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="e.g. kamala@eldercare.demo"
+                  disabled={requiresTotp}
                   className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-lg focus:border-blue-600 focus:outline-none min-h-[52px]"
                 />
               </div>
@@ -131,9 +169,35 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
+                  disabled={requiresTotp}
                   className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-lg focus:border-blue-600 focus:outline-none min-h-[52px]"
                 />
               </div>
+
+              {/* TOTP 2FA Step */}
+              {requiresTotp && (
+                <div className="p-4 bg-blue-50 border-2 border-blue-300 rounded-2xl space-y-2">
+                  <label htmlFor="totpCode" className="block text-base font-bold text-blue-900">
+                    Two-Factor Authentication Code
+                  </label>
+                  <p className="text-sm text-blue-700">
+                    Enter the 6-digit verification code from your authenticator app.
+                  </p>
+                  <input
+                    id="totpCode"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    required
+                    autoFocus
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value)}
+                    placeholder="123456"
+                    className="w-full px-4 py-3 rounded-xl border-2 border-blue-400 text-2xl tracking-widest text-center font-mono focus:border-blue-600 focus:outline-none min-h-[52px]"
+                  />
+                </div>
+              )}
             </>
           ) : (
             <div>
@@ -161,19 +225,37 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xl shadow-md min-h-[56px] transition-colors"
+            className="w-full py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xl shadow-md min-h-[56px] transition-colors disabled:opacity-50"
           >
-            {isLoading ? 'Signing in...' : authMode === 'passcode' ? 'Unlock Profile' : 'Sign In'}
+            {isLoading
+              ? 'Verifying...'
+              : requiresTotp
+              ? 'Verify 2FA & Sign In'
+              : authMode === 'passcode'
+              ? 'Unlock Profile'
+              : 'Sign In'}
           </button>
         </form>
 
-        <div className="mt-8 text-center text-sm text-slate-500 border-t pt-4">
-          <p>
-            Demo Accounts: <br />
-            <strong>Kamala:</strong> kamala@eldercare.demo (PIN: 1234) <br />
-            <strong>Rajesh:</strong> rajesh@eldercare.demo (PIN: 5678)
-          </p>
+        <div className="mt-6 text-center text-sm text-slate-600">
+          Don&apos;t have an account?{' '}
+          <Link href="/signup" className="font-bold text-blue-600 hover:underline">
+            Create an Account
+          </Link>
         </div>
+
+        {/* Demo Credentials block: strictly gated behind non-production environment */}
+        {process.env.NODE_ENV !== 'production' && (
+          <div className="mt-8 text-center text-sm text-slate-500 border-t pt-4 bg-slate-50 p-3 rounded-xl border border-dashed border-slate-300">
+            <span className="font-bold text-xs uppercase tracking-wider text-slate-400 block mb-1">
+              Development Only Demo Credentials
+            </span>
+            <p>
+              <strong>Kamala:</strong> kamala@eldercare.demo (PIN: 1234) <br />
+              <strong>Rajesh:</strong> rajesh@eldercare.demo (PIN: 5678)
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

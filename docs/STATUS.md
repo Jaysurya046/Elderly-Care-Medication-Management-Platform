@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 1 (1a, 1b, 1c) Completed and Verified*
+*Last updated: Phase 2 (Real Authentication & Sessions) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,12 +13,12 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **18 test files, 87 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
-| `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors. |
-| `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.94 MB) in 247ms. |
+| `pnpm test` | ✅ PASS | **20 test files, 95 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all 18 routes and edge middleware. |
+| `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.94 MB) in 245ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
 | `pnpm test:e2e` | ⚠️ Browser Ready | Downloaded Chromium binary via `playwright install chromium`. Ready for real-stack database E2E tests in Phase 7. |
-| **Migrations** | ✅ PASS | Committed initial migration `20261121000000_init` and append-only audit trigger migration `20261122000000_audit_log_append_only`. CI runs `prisma migrate deploy` and `prisma migrate diff --exit-code`. |
+| **Migrations** | ✅ PASS | Committed initial migration `20261121000000_init`, append-only audit trigger `20261122000000_audit_log_append_only`, and password reset token table `20261122010000_password_reset_token`. CI runs `prisma migrate deploy` and `prisma migrate diff`. |
 | **Manifest & PWA Icons** | ✅ PASS | Created `apps/web/public/` serving `/manifest.json`, `/icon-192.png`, and `/icon-512.png`. |
 
 ---
@@ -43,6 +43,23 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **14. Shared Zod Schemas & Error Sanitization** | ✅ Complete | Shared schemas in `@elder-care/core/src/schemas.ts` validate all inputs with 400 field-level plain errors. Generic 500 handler with Pino logging masks internal errors and returns opaque `requestId`. |
 | **15. Append-Only Audit Log Database Trigger** | ✅ Complete | Migration `20261122000000_audit_log_append_only` adds Postgres trigger raising exception on any `UPDATE` or `DELETE` attempt on `"audit_logs"`, and revokes mutation privileges from PUBLIC. Captures real client IP (via `x-forwarded-for`/`x-real-ip`) and user agent. Audits successful health data reads. |
 | **16. TypeScript AST Route Guard Enforcement** | ✅ Complete | Replaced string check with a full TypeScript AST parser verifying that every exported HTTP method directly calls `requireProfileAccess`. Added runtime tests for 401 unauthenticated, 403 non-member, and 403 revoked member access with audit logs. |
+
+---
+
+## 3. Phase 2 Real Authentication & Sessions Controls Summary
+
+| Phase 2 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Sign-Up with Server Consent** | ✅ Complete | `POST /api/auth/signup` validates password strength, records server consent version (`v1.0`), creates profile, establishes httpOnly session cookie. |
+| **2. Sign-In with TOTP 2FA** | ✅ Complete | `POST /api/auth/signin` verifies Argon2id password, checks if TOTP is enabled and validates 6-digit TOTP code against AES-256-GCM secret. |
+| **3. Sign-Out & Immediate Revocation** | ✅ Complete | `POST /api/auth/signout` atomically deletes the session record from PostgreSQL, clearing the session cookie. Next request receives 401. |
+| **4. Password Reset with Revocation** | ✅ Complete | `requestPasswordReset` creates 32-byte SHA-256 hashed token with 1h expiry (rate limited). `resetPasswordWithToken` resets Argon2id hash and invalidates all active sessions cross-device. |
+| **5. TOTP Enrol & Disable** | ✅ Complete | Enrols with `otpauth` URI and stores encrypted secret. Disables upon verification. |
+| **6. Passcode Set & Verify** | ✅ Complete | Passcode set with Argon2id hash. Verified strictly against session user's membership. |
+| **7. Session Listing & Remote Revocation** | ✅ Complete | `GET /api/auth/sessions` lists active sessions with IP and user agent. `DELETE /api/auth/sessions/[id]` immediately revokes remote device sessions. |
+| **8. Real Auth Pages (No Stubs)** | ✅ Complete | `apps/web/src/app/(auth)/login/page.tsx` and `signup/page.tsx` connect to real API endpoints, wrap in Suspense, announce server errors with `aria-live="assertive"`, and gate demo credentials behind `NODE_ENV !== 'production'`. |
+| **9. Edge Route Protection Middleware** | ✅ Complete | `apps/web/src/middleware.ts` redirects unauthenticated users away from `/senior`, `/dashboard`, `/profiles/*` to `/login?redirect=...`. Exempts emergency paths. |
+| **10. Production Seed Script Guard** | ✅ Complete | `packages/db/src/seed-guard.ts` throws immediately if `NODE_ENV === 'production'`, preventing accidental database wipe. |
 
 ---
 

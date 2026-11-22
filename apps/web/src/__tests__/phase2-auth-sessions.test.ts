@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { prisma, Role } from '@elder-care/db';
+import { guardSeedExecution } from '../../../../packages/db/src/seed-guard';
 import {
   signUpUser,
   authenticateWithPassword,
@@ -50,18 +53,71 @@ describe('Phase 2: Authentication, Sessions, Password Reset, and Middleware Rout
       const originalEnv = process.env.NODE_ENV;
       try {
         (process.env as any).NODE_ENV = 'production';
-        // Dynamically import seed script
-        const seedModule = await import('../../../../packages/db/prisma/seed');
-        // If seedModule exports a guard function or main, calling it must throw
-        if (typeof seedModule.guardSeedExecution === 'function') {
-          expect(() => seedModule.guardSeedExecution()).toThrow(/production/i);
-        } else {
-          // If guard does not exist, fail
-          expect(typeof (seedModule as any).guardSeedExecution).toBe('function');
-        }
+        expect(() => guardSeedExecution()).toThrow(/production/i);
+
+        // Verify seed.ts calls guardSeedExecution
+        const seedPath = path.resolve(__dirname, '../../../../packages/db/prisma/seed.ts');
+        const seedContent = fs.readFileSync(seedPath, 'utf-8');
+        expect(seedContent).toContain('guardSeedExecution()');
       } finally {
         (process.env as any).NODE_ENV = originalEnv;
       }
+    });
+  });
+
+  describe('Sign-Up & Sign-In with Server-Side Consent & TOTP', () => {
+    it('records consentVersion on sign-up and rejects sign-up if explicit consent is omitted', async () => {
+      await expect(
+        signUpUser({
+          name: 'Elder',
+          email: 'elder@example.com',
+          password: 'Password123!',
+          consentGiven: false,
+        })
+      ).rejects.toThrow(/consent.*required/i);
+
+      (prisma.user.findUnique as any).mockResolvedValue(null);
+      (prisma.user.create as any).mockResolvedValue({
+        id: 'user-new',
+        name: 'Elder',
+        email: 'elder@example.com',
+        consentVersion: 'v1.0',
+      });
+
+      const user = await signUpUser({
+        name: 'Elder',
+        email: 'elder@example.com',
+        password: 'Password123!',
+        consentGiven: true,
+      });
+
+      expect(user.consentVersion).toBe('v1.0');
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            consentVersion: 'v1.0',
+          }),
+        })
+      );
+    });
+
+    it('requires TOTP code if user has 2FA enabled', async () => {
+      const { hashSecret, encryptString, generateTotpSecret } = await import('../lib/crypto');
+      const pwHash = await hashSecret('Password123!');
+      const { secret } = generateTotpSecret('2fa@example.com');
+      const encryptedTotp = encryptString(secret);
+
+      (prisma.user.findUnique as any).mockResolvedValue({
+        id: 'user-2fa',
+        email: '2fa@example.com',
+        passwordHash: pwHash,
+        totpSecret: encryptedTotp,
+      });
+
+      // Attempt login without totpCode
+      await expect(
+        authenticateWithPassword('2fa@example.com', 'Password123!')
+      ).rejects.toThrow('TOTP_REQUIRED');
     });
   });
 
@@ -91,6 +147,13 @@ describe('Phase 2: Authentication, Sessions, Password Reset, and Middleware Rout
       );
 
       // Confirm reset
+      (prisma.passwordResetToken.findUnique as any).mockResolvedValue({
+        id: 'prt-1',
+        userId: 'user-123',
+        tokenHash: 'hashed-token',
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 3600000),
+      });
       (prisma.passwordResetToken.updateMany as any).mockResolvedValue({ count: 1 });
       (prisma.session.deleteMany as any).mockResolvedValue({ count: 3 });
 

@@ -109,3 +109,17 @@ This document records architectural, technical, and domain decisions made throug
   5. Audit log immutability enforced at the database level via Postgres triggers rejecting `UPDATE` and `DELETE` on `"audit_logs"`, and revoking table mutation privileges from PUBLIC. Audit logs record client IP (via `x-forwarded-for`/`x-real-ip`) and user agent, auditing successful reads of health data.
   6. Route guard verification strengthened using TypeScript AST traversal to verify that every exported HTTP method directly invokes `requireProfileAccess`.
 - **Rationale**: Direct compliance with Phase 1c security mandates and Section 4/8/9 of Goal.md.
+
+### DEC-015: Real Authentication, Password Reset, Session Revocation, and Edge Middleware (Phase 2)
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: User onboarding, authentication lifecycle, 2FA/TOTP verification, cross-device session revocation, password reset security, and route protection.
+- **Decision**:
+  1. Dedicated sign-up flow (`POST /api/auth/signup`) records consent version (`v1.0`) and timestamp in the user record, hashes passwords via Argon2id, creates an initial user profile, and establishes an authenticated session.
+  2. Sign-in (`POST /api/auth/signin`) supports step-up 2FA (TOTP) when enabled, verifying TOTP tokens against decrypted AES-256-GCM secrets with a drift window.
+  3. Password reset uses 32-byte cryptographically secure random tokens stored strictly as SHA-256 hashes (`PasswordResetToken` table) with 1-hour expiration and Redis rate limiting (3 requests per 15 mins). Confirming a password reset resets the password and atomically invalidates all active sessions for that user across all devices.
+  4. Passcode management allows setting 4-6 digit numeric PINs (Argon2id hashed) and verification bound to the authenticated user's session.
+  5. Session management (`/api/auth/sessions`) lists all active sessions and allows revocation of specific sessions or all other sessions. Session cookies are configured with `httpOnly: true`, `SameSite: 'lax'`, and `secure: true` in production.
+  6. Next.js Edge Middleware (`apps/web/src/middleware.ts`) protects routes (`/senior`, `/dashboard`, `/profiles/*`), redirecting unauthenticated users to `/login` while explicitly exempting emergency paths (`/emergency`, `/profiles/[id]/emergency`).
+  7. Seed script (`packages/db/prisma/seed.ts`) guarded with `guardSeedExecution()`, failing immediately if executed under `NODE_ENV === 'production'`.
+- **Rationale**: Meets all Phase 2 requirements for robust, auditable user authentication and immediate session invalidation without token drift.

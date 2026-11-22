@@ -1,9 +1,11 @@
 import { PrismaClient, Role, MembershipStatus, MedicationCriticality, AppointmentStatus } from '@prisma/client';
 import { hash } from '@node-rs/argon2';
+import { guardSeedExecution } from '../src/seed-guard';
 
 const prisma = new PrismaClient();
 
 async function main() {
+  guardSeedExecution();
   console.log('🌱 Starting database seeding...');
 
   // Default password hash for all demo users: "Password123!"
@@ -362,11 +364,13 @@ async function main() {
   console.log('👤 Caregiver 2: anita@eldercare.demo (Password: Password123!, PIN: 5678)');
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Seeding error:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (!process.env.VITEST) {
+  main()
+    .catch((e) => {
+      console.error('❌ Seeding error:', e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

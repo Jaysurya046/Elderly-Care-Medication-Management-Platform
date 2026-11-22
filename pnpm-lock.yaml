@@ -388,6 +388,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@node-rs/argon2':
+        specifier: ^2.2.2
+        version: 2.2.2
       '@prisma/client':
         specifier: ^6.4.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)

@@ -12,14 +12,52 @@ export default function SignUpPage() {
   const [password, setPassword] = React.useState('');
   const [consentGiven, setConsentGiven] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState('');
+  const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
+  const [isLoading, setIsLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
+    setFieldErrors({});
+
     if (!consentGiven) {
       setErrorMessage('You must review and agree to the privacy and health consent notice.');
       return;
     }
-    router.push('/dashboard');
+
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+          consentGiven: true,
+          consentVersion: 'v1.0',
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        if (data.errors) {
+          setFieldErrors(data.errors);
+        }
+        setErrorMessage(data.error || 'Account creation failed. Please check your entries.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Successfully signed up and authenticated with session cookie
+      router.push('/dashboard');
+      router.refresh();
+    } catch {
+      setErrorMessage('A network error occurred. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -60,6 +98,9 @@ export default function SignUpPage() {
               placeholder="e.g. Kamala Devi"
               className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-lg focus:border-blue-600 focus:outline-none min-h-[52px]"
             />
+            {fieldErrors.name && (
+              <p className="text-rose-600 text-sm font-semibold mt-1">{fieldErrors.name}</p>
+            )}
           </div>
 
           <div>
@@ -75,6 +116,9 @@ export default function SignUpPage() {
               placeholder="e.g. kamala@example.com"
               className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-lg focus:border-blue-600 focus:outline-none min-h-[52px]"
             />
+            {fieldErrors.email && (
+              <p className="text-rose-600 text-sm font-semibold mt-1">{fieldErrors.email}</p>
+            )}
           </div>
 
           <div>
@@ -90,37 +134,48 @@ export default function SignUpPage() {
               placeholder="At least 8 characters"
               className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 text-lg focus:border-blue-600 focus:outline-none min-h-[52px]"
             />
+            {fieldErrors.password && (
+              <p className="text-rose-600 text-sm font-semibold mt-1">{fieldErrors.password}</p>
+            )}
           </div>
 
-          {/* Explicit Consent Checkbox (Section 8 DPDP & GDPR requirement) */}
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div className="flex items-start gap-3">
+          {/* Explicit Consent & Privacy Notice (Section 8 DPDP & GDPR requirement) */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <div className="text-sm text-slate-700 leading-relaxed font-medium">
+              <strong className="text-slate-900 block mb-1">Health Data Privacy Notice (v1.0):</strong>
+              We store and process sensitive health information (medications, dose adherence, appointments, doctor notes) solely to facilitate your care circle coordination. Your health data is never shared with third parties or advertisers.
+            </div>
+
+            <div className="flex items-start gap-3 pt-2 border-t border-slate-200">
               <input
                 id="consent"
                 type="checkbox"
+                required
                 checked={consentGiven}
                 onChange={(e) => setConsentGiven(e.target.checked)}
-                className="w-6 h-6 mt-0.5 rounded border-2 border-slate-400 text-blue-600 focus:ring-blue-500 shrink-0"
+                className="w-5 h-5 mt-0.5 rounded border-2 border-slate-400 text-blue-600 focus:ring-blue-500 shrink-0"
               />
-              <label htmlFor="consent" className="text-sm text-slate-700 leading-snug">
-                I understand and consent to storing my medicine schedules and health routines
-                securely. I retain ownership of my profile and can export or delete it at any time.
-                (Consent Version: <strong>v1.0</strong>)
+              <label htmlFor="consent" className="text-sm font-bold text-slate-800 leading-snug cursor-pointer">
+                I give explicit consent to the processing of medical and health information as described in Notice v1.0.
               </label>
             </div>
+            {fieldErrors.consentGiven && (
+              <p className="text-rose-600 text-sm font-semibold">{fieldErrors.consentGiven}</p>
+            )}
           </div>
 
           <button
             type="submit"
-            className="w-full py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xl shadow-md min-h-[56px] transition-colors"
+            disabled={isLoading}
+            className="w-full py-4 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xl shadow-md min-h-[56px] transition-colors disabled:opacity-50"
           >
-            Create My Account
+            {isLoading ? 'Creating Account...' : 'Agree & Create Account'}
           </button>
         </form>
 
         <div className="mt-6 text-center text-sm text-slate-600">
           Already have an account?{' '}
-          <Link href="/login" className="text-blue-600 font-bold underline">
+          <Link href="/login" className="font-bold text-blue-600 hover:underline">
             Sign In
           </Link>
         </div>

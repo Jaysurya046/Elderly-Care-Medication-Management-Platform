@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { prisma, User } from '@elder-care/db';
 import {
   hashSecret,
@@ -6,6 +7,7 @@ import {
   verifyTotpCode,
   encryptString,
   decryptString,
+  generateRandomToken,
 } from '../lib/crypto';
 import { checkRateLimit, resetRateLimit } from '../lib/rate-limiter';
 import { recordAuditLog } from '../lib/audit';
@@ -233,4 +235,222 @@ export async function verifyMemberPasscode(
     success: false,
     error: `Incorrect passcode. ${5 - newFailures} attempt(s) remaining before lockout.`,
   };
+}
+
+function hashToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+/**
+ * Requests a password reset. Rate-limited (3 attempts per hour).
+ * Generates an unguessable raw token, stores only its SHA-256 hash with 1 hour expiration.
+ */
+export async function requestPasswordReset(email: string): Promise<{ success: boolean; rawToken?: string }> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const rateLimitKey = `rate_limit:pw_reset:${normalizedEmail}`;
+
+  const rateLimit = await checkRateLimit(rateLimitKey, 3, 3600);
+  if (!rateLimit.success) {
+    throw new Error('Too many password reset requests. Please wait an hour before trying again.');
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+  });
+
+  if (!user || user.deletedAt) {
+    // Return success to avoid email enumeration
+    return { success: true };
+  }
+
+  const rawToken = generateRandomToken(32);
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  await recordAuditLog({
+    actorUserId: user.id,
+    action: 'AUTH:LOGIN',
+    entityType: 'User',
+    entityId: user.id,
+    metadata: { action: 'PASSWORD_RESET_REQUESTED' },
+  });
+
+  return {
+    success: true,
+    rawToken: process.env.NODE_ENV !== 'production' ? rawToken : undefined,
+  };
+}
+
+/**
+ * Verifies a password reset token, updates password with Argon2id,
+ * and strictly revokes ALL active sessions for that user across all devices.
+ */
+export async function resetPasswordWithToken(
+  token: string,
+  newPassword: string
+): Promise<{ success: boolean }> {
+  if (newPassword.length < 8) {
+    throw new Error('Password must be at least 8 characters long.');
+  }
+
+  const tokenHash = hashToken(token);
+  const now = new Date();
+
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
+  if (!resetToken || resetToken.usedAt || resetToken.expiresAt < now) {
+    throw new Error('Password reset link is invalid or has expired.');
+  }
+
+  // Atomically mark token as used
+  const updateRes = await prisma.passwordResetToken.updateMany({
+    where: { id: resetToken.id, usedAt: null, expiresAt: { gt: now } },
+    data: { usedAt: now },
+  });
+
+  if (updateRes.count !== 1) {
+    throw new Error('Password reset link has already been used.');
+  }
+
+  const passwordHash = await hashSecret(newPassword);
+  await prisma.user.update({
+    where: { id: resetToken.userId },
+    data: { passwordHash },
+  });
+
+  // CRITICAL SECURITY CONTROL: Revoke all active sessions on password change
+  await prisma.session.deleteMany({
+    where: { userId: resetToken.userId },
+  });
+
+  await recordAuditLog({
+    actorUserId: resetToken.userId,
+    action: 'AUTH:LOGOUT',
+    entityType: 'User',
+    entityId: resetToken.userId,
+    metadata: { reason: 'PASSWORD_CHANGED_ALL_SESSIONS_REVOKED' },
+  });
+
+  return { success: true };
+}
+
+/**
+ * Enrolls TOTP two-factor authentication for a user.
+ * Generates an encrypted secret stored at rest.
+ */
+export async function enrolTotp(userId: string): Promise<{ secret: string; otpauthUrl: string }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) throw new UnauthorizedError();
+
+  const totp = generateTotpSecret(user.email);
+  const encryptedSecret = encryptString(totp.secret);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { totpSecret: encryptedSecret },
+  });
+
+  return { secret: totp.secret, otpauthUrl: totp.uri };
+}
+
+/**
+ * Disables TOTP two-factor authentication for a user.
+ */
+export async function disableTotp(userId: string): Promise<{ success: boolean }> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { totpSecret: null },
+  });
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'AUTH:LOGOUT',
+    entityType: 'User',
+    entityId: userId,
+    metadata: { action: 'TOTP_DISABLED' },
+  });
+
+  return { success: true };
+}
+
+export interface UserSessionView {
+  id: string;
+  createdAt: Date;
+  expiresAt: Date;
+  isCurrent: boolean;
+}
+
+/**
+ * Lists all active database sessions for a user.
+ */
+export async function listUserSessions(
+  userId: string,
+  currentSessionId?: string
+): Promise<UserSessionView[]> {
+  const sessions = await prisma.session.findMany({
+    where: {
+      userId,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return sessions.map((s) => ({
+    id: s.id,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    isCurrent: s.id === currentSessionId,
+  }));
+}
+
+/**
+ * Revokes an individual user session from the database.
+ */
+export async function revokeUserSession(
+  userId: string,
+  targetSessionId: string
+): Promise<{ success: boolean }> {
+  await prisma.session.deleteMany({
+    where: { id: targetSessionId, userId },
+  });
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'AUTH:LOGOUT',
+    entityType: 'Session',
+    entityId: targetSessionId,
+    metadata: { reason: 'INDIVIDUAL_SESSION_REVOKED' },
+  });
+
+  return { success: true };
+}
+
+/**
+ * Revokes all sessions for a user (except optionally the current one).
+ */
+export async function revokeAllUserSessions(
+  userId: string,
+  exceptSessionId?: string
+): Promise<{ success: boolean }> {
+  await prisma.session.deleteMany({
+    where: {
+      userId,
+      ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+    },
+  });
+
+  return { success: true };
 }

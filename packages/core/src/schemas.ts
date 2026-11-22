@@ -59,6 +59,40 @@ export const verifyPasscodeSchema = z.object({
   passcode: z.string().regex(/^\d{4,6}$/, 'Passcode must be between 4 and 6 digits'),
 });
 
+export const signUpSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200),
+  email: z.string().email('Please enter a valid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  consentGiven: z.boolean().refine((val) => val === true, {
+    message: 'Explicit consent to health data processing is required.',
+  }),
+  consentVersion: z.string().default('v1.0'),
+});
+
+export const signInSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+  password: z.string().min(1, 'Password is required'),
+  totpCode: z.string().optional(),
+});
+
+export const requestPasswordResetSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+export const totpVerifySchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'TOTP code must be 6 digits'),
+});
+
+export const setPasscodeSchema = z.object({
+  membershipId: z.string().min(1, 'Membership ID is required'),
+  passcode: z.string().regex(/^\d{4,6}$/, 'Passcode must be between 4 and 6 digits'),
+});
+
 export function formatZodError(error: z.ZodError): Record<string, string> {
   const formatted: Record<string, string> = {};
   for (const issue of error.issues) {

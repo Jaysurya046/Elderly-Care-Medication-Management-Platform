@@ -61,6 +61,15 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
+export async function getCurrentSessionId(): Promise<string | null> {
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get(SESSION_COOKIE_NAME)?.value || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function setSessionCookie(sessionId: string): Promise<void> {
   const cookieStore = await cookies();
   const expires = new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000);

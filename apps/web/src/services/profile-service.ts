@@ -141,18 +141,19 @@ export async function rotateEmergencyCode(
 export async function requestProfileDeletion(
   profileId: string,
   actorUserId?: string
-): Promise<Date> {
+): Promise<{ deletionRequestedAt: Date; hardDeleteDate: Date }> {
   const { membership } = await requireProfileAccess(profileId, {
     role: Role.OWNER,
     userIdOverride: actorUserId,
   });
 
-  // 30-day grace period (Section 8: Data export and deletion)
-  const gracePeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  // deletionRequestedAt = request time. Compute hard-delete date as +30 days.
+  const requestedAt = new Date();
+  const hardDeleteDate = new Date(requestedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   await prisma.careProfile.update({
     where: { id: profileId },
-    data: { deletionRequestedAt: gracePeriodEnd },
+    data: { deletionRequestedAt: requestedAt },
   });
 
   await recordAuditLog({
@@ -162,10 +163,13 @@ export async function requestProfileDeletion(
     action: 'PROFILE:DELETE_REQUESTED',
     entityType: 'CareProfile',
     entityId: profileId,
-    metadata: { gracePeriodEnd: gracePeriodEnd.toISOString() },
+    metadata: {
+      requestedAt: requestedAt.toISOString(),
+      hardDeleteDate: hardDeleteDate.toISOString(),
+    },
   });
 
-  return gracePeriodEnd;
+  return { deletionRequestedAt: requestedAt, hardDeleteDate };
 }
 
 export async function cancelProfileDeletion(

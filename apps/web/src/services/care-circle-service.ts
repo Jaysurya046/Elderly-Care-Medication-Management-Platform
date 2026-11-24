@@ -1,7 +1,13 @@
 import { prisma, Role, MembershipStatus, Membership, Invitation } from '@elder-care/db';
 import { DEFAULT_ROLE_SCOPES, Scopes } from '@elder-care/core';
 import { generateRandomToken, hashToken } from '../lib/crypto';
-import { requireProfileAccess } from '../lib/auth-guard';
+import {
+  requireProfileAccess,
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  ForbiddenError,
+} from '../lib/auth-guard';
 import { recordAuditLog } from '../lib/audit';
 import { sendEmail } from '../lib/email';
 import { CaregiverInvitationEmail } from '@elder-care/email';
@@ -20,7 +26,7 @@ export async function createCareCircleInvitation(
 ): Promise<{ invitation: Invitation; rawToken: string }> {
   // Reject role: OWNER invitations
   if (input.role === Role.OWNER) {
-    throw new Error('Cannot invite a member with role OWNER. Transfer ownership instead.');
+    throw new ValidationError('Cannot invite a member with role OWNER. Transfer ownership instead.');
   }
 
   const { membership, profile } = await requireProfileAccess(profileId, {
@@ -86,7 +92,7 @@ export async function acceptCareCircleInvitation(
   });
 
   if (!user) {
-    throw new Error('User not found.');
+    throw new NotFoundError('User not found.');
   }
 
   const tokenHash = hashToken(rawToken);
@@ -95,20 +101,20 @@ export async function acceptCareCircleInvitation(
   });
 
   if (!invitation) {
-    throw new Error('Invalid or expired invitation token.');
+    throw new NotFoundError('Invalid or expired invitation token.');
   }
 
   if (invitation.usedAt) {
-    throw new Error('This invitation has already been used.');
+    throw new ConflictError('This invitation has already been used.');
   }
 
   if (invitation.expiresAt.getTime() < Date.now()) {
-    throw new Error('This invitation has expired. Please request a new invitation.');
+    throw new ConflictError('This invitation has expired. Please request a new invitation.');
   }
 
   // Invitee must be signed in with the invited email address (Section 4)
   if (invitation.email.toLowerCase() !== user.email.toLowerCase()) {
-    throw new Error(
+    throw new ForbiddenError(
       `This invitation was issued to ${invitation.email}. You are signed in as ${user.email}.`
     );
   }
@@ -120,7 +126,7 @@ export async function acceptCareCircleInvitation(
   });
 
   if (updateRes.count !== 1) {
-    throw new Error('This invitation has already been used.');
+    throw new ConflictError('This invitation has already been used.');
   }
 
   // Membership stays INVITED until elder or an OWNER confirms role and scopes
@@ -195,7 +201,7 @@ export async function confirmCareCircleMember(
   });
 
   if (!target || target.profileId !== profileId) {
-    throw new Error('Membership not found in this profile.');
+    throw new NotFoundError('Membership not found in this profile.');
   }
 
   const finalScopes = confirmedScopes
@@ -238,7 +244,7 @@ export async function revokeCareCircleMembership(
   });
 
   if (!target || target.profileId !== profileId) {
-    throw new Error('Membership not found in this profile.');
+    throw new NotFoundError('Membership not found in this profile.');
   }
 
   if (target.role === Role.OWNER) {
@@ -246,7 +252,7 @@ export async function revokeCareCircleMembership(
       where: { profileId, role: Role.OWNER, status: MembershipStatus.ACTIVE },
     });
     if (ownerCount <= 1) {
-      throw new Error('Cannot remove the last owner of the profile.');
+      throw new ConflictError('Cannot remove the last owner of the profile.');
     }
   }
 
@@ -286,7 +292,7 @@ export async function updateCareCircleScopes(
   });
 
   if (!target || target.profileId !== profileId) {
-    throw new Error('Membership not found.');
+    throw new NotFoundError('Membership not found.');
   }
 
   const mergedScopes = { ...((target.scopes || {}) as Record<string, boolean>), ...newScopes };

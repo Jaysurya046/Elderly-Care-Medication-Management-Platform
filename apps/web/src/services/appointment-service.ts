@@ -1,5 +1,5 @@
 import { prisma, Appointment, AppointmentStatus, Role } from '@elder-care/db';
-import { requireProfileAccess } from '../lib/auth-guard';
+import { requireProfileAccess, NotFoundError, ForbiddenError } from '../lib/auth-guard';
 import { recordAuditLog } from '../lib/audit';
 import { calculateAdherence, DoseRecord } from '@elder-care/core';
 
@@ -121,11 +121,11 @@ export async function getAppointmentPrepSummary(
   });
 
   if (!appointment || appointment.profileId !== profileId) {
-    throw new Error('Appointment not found.');
+    throw new NotFoundError('Appointment not found.');
   }
 
   if (appointment.isPrivate && !canViewPrivate) {
-    throw new Error('You do not have permission to view this private appointment.');
+    throw new ForbiddenError('You do not have permission to view this private appointment.');
   }
 
   // 1. Current active medications

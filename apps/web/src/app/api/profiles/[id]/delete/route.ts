@@ -22,12 +22,13 @@ export async function POST(
     // Profile deletion strictly requires OWNER role
     await requireProfileAccess(id, { role: Role.OWNER });
 
-    const gracePeriodEnd = await requestProfileDeletion(id);
+    const { deletionRequestedAt, hardDeleteDate } = await requestProfileDeletion(id);
 
     return NextResponse.json({
       success: true,
       message: 'Profile deletion scheduled with a 30-day grace period.',
-      hardDeletionDate: gracePeriodEnd.toISOString(),
+      deletionRequestedAt: deletionRequestedAt.toISOString(),
+      hardDeletionDate: hardDeleteDate.toISOString(),
     });
   } catch (error: any) {
     return handleApiError(error, request);

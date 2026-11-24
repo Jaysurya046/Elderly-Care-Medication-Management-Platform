@@ -1,37 +1,36 @@
 import { prisma, Role, Membership, CareProfile, User } from '@elder-care/db';
-import { ScopeKey, Scopes } from '@elder-care/core';
+import {
+  ScopeKey,
+  Scopes,
+  AppError,
+  ValidationError,
+  AuthError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  UnprocessableEntityError,
+  RateLimitError,
+  ServiceUnavailableError,
+} from '@elder-care/core';
 import { getCurrentUser } from './session';
 import { recordAuditLog } from './audit';
 
-export class UnauthorizedError extends Error {
-  public statusCode = 401;
+export {
+  AppError,
+  ValidationError,
+  AuthError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  UnprocessableEntityError,
+  RateLimitError,
+  ServiceUnavailableError,
+};
+
+export class UnauthorizedError extends AuthError {
   constructor(message: string = 'You must be signed in to perform this action.') {
     super(message);
     this.name = 'UnauthorizedError';
-  }
-}
-
-export class ForbiddenError extends Error {
-  public statusCode = 403;
-  constructor(message: string = 'You do not have permission to access this health data.') {
-    super(message);
-    this.name = 'ForbiddenError';
-  }
-}
-
-export class NotFoundError extends Error {
-  public statusCode = 404;
-  constructor(message: string = 'Requested care profile was not found.') {
-    super(message);
-    this.name = 'NotFoundError';
-  }
-}
-
-export class ConflictError extends Error {
-  public statusCode = 409;
-  constructor(message: string = 'Conflict: resource was modified concurrently.') {
-    super(message);
-    this.name = 'ConflictError';
   }
 }
 

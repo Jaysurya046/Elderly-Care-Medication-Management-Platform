@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { prisma, User } from '@elder-care/db';
 import {
+  AuthError,
+  ConflictError,
+  ValidationError,
+  RateLimitError,
+} from '@elder-care/core';
+import {
   hashSecret,
   verifySecret,
   generateTotpSecret,
@@ -22,14 +28,14 @@ export interface SignUpInput {
 
 export async function signUpUser(input: SignUpInput): Promise<User> {
   if (!input.consentGiven) {
-    throw new Error('Explicit consent to data processing is required to create an account.');
+    throw new ValidationError('Explicit consent to data processing is required to create an account.');
   }
 
   const existing = await prisma.user.findUnique({
     where: { email: input.email.toLowerCase().trim() },
   });
   if (existing) {
-    throw new Error('An account with this email address already exists.');
+    throw new ConflictError('An account with this email address already exists.');
   }
 
   const passwordHash = await hashSecret(input.password);
@@ -63,7 +69,7 @@ export async function authenticateWithPassword(
 
   const rateLimit = await checkRateLimit(rateLimitKey, 5, 900);
   if (!rateLimit.success) {
-    throw new Error(
+    throw new RateLimitError(
       `Too many failed attempts. Account temporarily locked. Try again in ${Math.ceil(
         rateLimit.resetSeconds / 60
       )} minutes.`
@@ -75,23 +81,23 @@ export async function authenticateWithPassword(
   });
 
   if (!user || user.deletedAt) {
-    throw new Error('Invalid email or password.');
+    throw new AuthError('Invalid email or password.');
   }
 
   const passwordValid = await verifySecret(user.passwordHash, password);
   if (!passwordValid) {
-    throw new Error('Invalid email or password.');
+    throw new AuthError('Invalid email or password.');
   }
 
   // Check 2FA if enabled
   if (user.totpSecret) {
     if (!totpCode) {
-      throw new Error('TOTP_REQUIRED');
+      throw new AuthError('TOTP_REQUIRED');
     }
     const decryptedSecret = decryptString(user.totpSecret);
     const totpValid = verifyTotpCode(decryptedSecret, totpCode);
     if (!totpValid) {
-      throw new Error('Invalid two-factor authentication code.');
+      throw new AuthError('Invalid two-factor authentication code.');
     }
   }
 
@@ -113,7 +119,7 @@ export async function setMemberPasscode(
   passcode: string
 ): Promise<void> {
   if (!/^\d{4,6}$/.test(passcode)) {
-    throw new Error('Passcode must be between 4 and 6 numeric digits.');
+    throw new ValidationError('Passcode must be between 4 and 6 numeric digits.');
   }
 
   const passcodeHash = await hashSecret(passcode);
@@ -251,7 +257,7 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
 
   const rateLimit = await checkRateLimit(rateLimitKey, 3, 3600);
   if (!rateLimit.success) {
-    throw new Error('Too many password reset requests. Please wait an hour before trying again.');
+    throw new RateLimitError('Too many password reset requests. Please wait an hour before trying again.');
   }
 
   const user = await prisma.user.findUnique({
@@ -298,7 +304,7 @@ export async function resetPasswordWithToken(
   newPassword: string
 ): Promise<{ success: boolean }> {
   if (newPassword.length < 8) {
-    throw new Error('Password must be at least 8 characters long.');
+    throw new ValidationError('Password must be at least 8 characters long.');
   }
 
   const tokenHash = hashToken(token);
@@ -310,7 +316,7 @@ export async function resetPasswordWithToken(
   });
 
   if (!resetToken || resetToken.usedAt || resetToken.expiresAt < now) {
-    throw new Error('Password reset link is invalid or has expired.');
+    throw new AuthError('Password reset link is invalid or has expired.');
   }
 
   // Atomically mark token as used
@@ -320,7 +326,7 @@ export async function resetPasswordWithToken(
   });
 
   if (updateRes.count !== 1) {
-    throw new Error('Password reset link has already been used.');
+    throw new ConflictError('Password reset link has already been used.');
   }
 
   const passwordHash = await hashSecret(newPassword);
@@ -460,3 +466,7 @@ export async function revokeAllUserSessions(
 
   return { success: true };
 }
+
+export const registerUser = signUpUser;
+export const loginWithPassword = authenticateWithPassword;
+

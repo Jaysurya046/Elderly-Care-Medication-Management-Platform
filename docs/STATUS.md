@@ -125,7 +125,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 |---|---|---|
 | **ESLint (`pnpm lint`)** | ✅ PASS | `pnpm -r run lint`: 6 packages clean, 0 errors, 0 warnings. |
 | **TypeScript (`pnpm type-check`)** | ✅ PASS | `pnpm -r run type-check`: 6 packages clean, 0 type errors. |
-| **Vitest (`pnpm test`)** | ✅ PASS | `vitest run`: **24 test files passed (24/24), 132 tests passed (132/132)**. |
+| **Vitest (`pnpm test`)** | ✅ PASS | `vitest run`: **27 test files passed (27/27), 161 tests passed (161/161)**. |
 | **Web Build (`next build`)** | ✅ PASS | `next build`: Next.js 15.5.29 compiled successfully, all 18 routes statically generated or dynamically rendered. |
 | **Worker Build (`tsup`)** | ✅ PASS | `tsup`: ESM production bundle `dist/index.js` (1.95 MB) built cleanly in ~280ms. |
 | **Axe Accessibility (`e2e/accessibility.spec.ts`)** | ✅ PASS | WCAG 2.1 & 2.2 AA audits assert 0 critical or serious violations on `/senior`, `/dashboard`, `/login`, and `/emergency`. |
@@ -166,4 +166,18 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **6. Emergency Card Server Component** | ✅ Complete | Converted to Next.js Server Component; verifies access (`view_medications` or valid emergency code) with no PHI on failure, queries real `EmergencyContact` records, records `EMERGENCY_CARD:VIEW` audit log, and fixes middleware exemption regex to match exactly `/profiles/[id]/emergency`. |
 | **7. Hashed Sessions at Rest & Metadata** | ✅ Complete | Session tokens are SHA-256 hashed at rest in PostgreSQL, capturing `ip` and `userAgent`, and displaying them in session listing (`auth-service.ts`, `session.ts`). |
 | **8. HMAC-Keyed IP Anonymization** | ✅ Complete | `sanitizeIpAddress` uses HMAC-SHA256 keyed with server secret (`AUDIT_HMAC_SECRET`), truncated to 16 hex characters; all routes pass real client IP and user agent to audit logs. |
+
+---
+
+## 11. Phase 8b Corrections: Deletion and Errors Summary
+
+| Phase 8b Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Audit Log FK Decoupling & Immutability** | ✅ Complete | Dropped `onDelete: SetNull` and FK constraint on `audit_logs` (`20261122030000_audit_log_drop_fk`). CareProfile deletions no longer trigger cascade updates that violate the immutable trigger, preserving audit records intact (`phase8b-deletion-errors.test.ts`). |
+| **2. Database Seed Compatibility with Trigger** | ✅ Complete | Replaced `prisma.auditLog.deleteMany()` in `seed.ts` with safe truncate fallback so append-only triggers do not raise exceptions during development re-seeding (`phase8b-deletion-errors.test.ts`). |
+| **3. Request-Time deletionRequestedAt & 30-Day Hard Deletion** | ✅ Complete | `requestProfileDeletion` sets `deletionRequestedAt` to the current timestamp (`new Date()`) and computes `hardDeleteDate` as `deletionRequestedAt + 30 days`. Scheduled deletion worker purges profiles with `deletionRequestedAt <= 30 days ago` (`scheduled-deletion.job.ts`, `profile-service.ts`). |
+| **4. Deletion Cancellation & Banner** | ✅ Complete | Dashboard banner computes and displays the scheduled 30-day purge date with an active OWNER cancellation button (`/api/profiles/[id]/delete` DELETE) that resets `deletionRequestedAt: null`. |
+| **5. Typed Domain Errors Across Services** | ✅ Complete | Defined `AppError`, `ValidationError` (400), `AuthError` (401), `ForbiddenError` (403), `NotFoundError` (404), `ConflictError` (409), `UnprocessableEntityError` (422), `RateLimitError` (429), and `ServiceUnavailableError` (503) in `@elder-care/core`. Replaced plain `throw new Error(...)` across `auth-service.ts`, `medication-service.ts`, `care-circle-service.ts`, and `appointment-service.ts`. |
+| **6. Atomic Lua Script & Eager Rate Limiter** | ✅ Complete | Refactored `rate-limiter.ts` to await Redis connectivity and execute `INCR` + `EXPIRE` atomically via an in-database Lua script, guaranteeing that no key is ever created without a TTL. Fails closed (503) in production when Redis is unreachable (`phase8b-deletion-errors.test.ts`). |
+
 

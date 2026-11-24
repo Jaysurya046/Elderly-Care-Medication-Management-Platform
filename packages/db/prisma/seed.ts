@@ -15,7 +15,12 @@ async function main() {
   const caregiverPasscodeHash = await hash('5678');
 
   // Clean existing data for clean re-seeding
-  await prisma.auditLog.deleteMany();
+  // Note: audit_logs is append-only with database triggers. Attempt TRUNCATE if database user permits; otherwise retain logs.
+  try {
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "audit_logs" CASCADE;`);
+  } catch {
+    // Append-only trigger prevents standard DELETE; preserve existing audit records
+  }
   await prisma.notificationLog.deleteMany();
   await prisma.careNote.deleteMany();
   await prisma.appointment.deleteMany();

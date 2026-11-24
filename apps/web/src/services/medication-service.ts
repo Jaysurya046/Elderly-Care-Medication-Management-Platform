@@ -235,7 +235,7 @@ export async function recordDoseAction(
   });
 
   if (!transitionResult.allowed) {
-    throw new Error(transitionResult.error || 'Transition not allowed.');
+    throw new ConflictError(transitionResult.error || 'Transition not allowed.');
   }
 
   const now = new Date();

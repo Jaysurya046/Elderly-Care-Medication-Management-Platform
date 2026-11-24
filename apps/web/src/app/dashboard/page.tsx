@@ -539,7 +539,7 @@ export default function CareCircleDashboardPage() {
             <div>
               <p className="text-lg">
                 Permanent Profile Deletion Scheduled for{' '}
-                {new Date(profile.deletionRequestedAt).toLocaleDateString()}
+                {new Date(new Date(profile.deletionRequestedAt).getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
               </p>
               <p className="text-sm text-rose-100 font-normal">
                 You are in the 30-day grace period. You can cancel this request at any time before that date.

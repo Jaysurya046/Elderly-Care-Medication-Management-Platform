@@ -106,7 +106,6 @@ model CareProfile {
   appointments            Appointment[]
   careNotes               CareNote[]
   notificationLogs        NotificationLog[]
-  auditLogs               AuditLog[]
   emergencyContacts       EmergencyContact[]
 
   @@index([ownerId])
@@ -313,7 +312,6 @@ model NotificationLog {
 model AuditLog {
   id                String       @id @default(uuid()) @db.Uuid
   profileId         String?      @db.Uuid
-  profile           CareProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   actorUserId       String?      @db.Uuid
   actorMembershipId String?      @db.Uuid
   action            String

@@ -1,27 +1,57 @@
 import Redis from 'ioredis';
+import { ServiceUnavailableError } from '@elder-care/core';
 
 let redisClient: Redis | null = null;
 const memoryStore = new Map<string, { count: number; expiresAt: number }>();
 
-function getRedisClient(): Redis | null {
-  if (redisClient) return redisClient;
+/**
+ * Atomic Lua script to execute INCR and EXPIRE atomically in a single round-trip.
+ * Guarantees that no key is ever created without a TTL even if the client disconnects immediately.
+ */
+const ATOMIC_INCR_EXPIRE_LUA = `
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('TTL', KEYS[1])
+return {current, ttl}
+`;
+
+/**
+ * Connects eagerly or awaits connection to Redis when REDIS_URL is provided.
+ */
+export async function getConnectedRedisClient(): Promise<Redis | null> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) return null;
 
-  try {
-    redisClient = new Redis(redisUrl, {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-      retryStrategy: () => null, // Don't infinite retry if Redis is down
-    });
-    redisClient.connect().catch(() => {
-      // Redis connection error
-      redisClient = null;
-    });
-    return redisClient;
-  } catch {
-    return null;
+  if (!redisClient) {
+    try {
+      redisClient = new Redis(redisUrl, {
+        maxRetriesPerRequest: 1,
+        lazyConnect: true,
+        retryStrategy: () => null, // Don't infinite retry if Redis is unreachable
+      });
+      // Suppress unhandled EventEmitter errors on the client
+      redisClient.on('error', () => {});
+    } catch {
+      return null;
+    }
   }
+
+  if (redisClient.status === 'ready') {
+    return redisClient;
+  }
+
+  if (redisClient.status === 'wait') {
+    try {
+      await redisClient.connect();
+      return redisClient;
+    } catch {
+      return null;
+    }
+  }
+
+  return (redisClient.status as string) === 'ready' ? redisClient : null;
 }
 
 export interface RateLimitResult {
@@ -42,15 +72,20 @@ export async function checkRateLimit(
   windowSeconds: number = 900 // 15 minutes default
 ): Promise<RateLimitResult> {
   const isProduction = process.env.NODE_ENV === 'production';
-  const client = getRedisClient();
+  const client = await getConnectedRedisClient();
 
   if (client && client.status === 'ready') {
     try {
-      const current = await client.incr(key);
-      if (current === 1) {
-        await client.expire(key, windowSeconds);
-      }
-      const ttl = await client.ttl(key);
+      // Execute atomic Lua script
+      const res = (await client.eval(
+        ATOMIC_INCR_EXPIRE_LUA,
+        1,
+        key,
+        windowSeconds
+      )) as [number, number];
+
+      const current = res[0];
+      const ttl = res[1];
 
       return {
         success: current <= maxAttempts,
@@ -69,7 +104,7 @@ export async function checkRateLimit(
     }
   }
 
-  // If in production and Redis is not ready/available, FAIL CLOSED
+  // If in production and Redis is not ready/available, FAIL CLOSED (503)
   if (isProduction) {
     return {
       success: false,
@@ -107,7 +142,7 @@ export async function checkRateLimit(
  * Resets rate limit for a key (e.g. on successful login or verification).
  */
 export async function resetRateLimit(key: string): Promise<void> {
-  const client = getRedisClient();
+  const client = await getConnectedRedisClient();
   if (client && client.status === 'ready') {
     try {
       await client.del(key);

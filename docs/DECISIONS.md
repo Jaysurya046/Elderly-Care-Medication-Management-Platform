@@ -208,5 +208,18 @@ This document records architectural, technical, and domain decisions made throug
   6. Session tokens stored strictly as SHA-256 hashes at rest in PostgreSQL, capturing `ip` and `userAgent`.
 - **Rationale**: Direct compliance with Phase 8a audit corrections.
 
+### DEC-022: Audit Immutability FK Decoupling, 30-Day Purge Lifecycle, Typed Domain Errors, and Atomic Lua Rate Limiter (Phase 8b)
+- **Date**: 2026-11-24
+- **Status**: Accepted
+- **Context**: Audit log append-only trigger conflicts on profile deletion, soft deletion timestamp semantics, standard HTTP domain error mapping, and rate limiter concurrency guarantees.
+- **Decision**:
+  1. Dropped `onDelete: SetNull` and the foreign key constraint from `audit_logs` to `care_profiles` (`20261122030000_audit_log_drop_fk`). This prevents PostgreSQL cascade updates from violating the append-only trigger when a profile is purged, while preserving historical `profileId` references in audit rows.
+  2. Updated `packages/db/prisma/seed.ts` to replace `prisma.auditLog.deleteMany()` with a safe truncate check to prevent append-only trigger exceptions during database initialization.
+  3. Stored `deletionRequestedAt` as the exact request timestamp (`new Date()`), computing `hardDeleteDate` as `deletionRequestedAt + 30 days`. Scheduled deletion worker queries `deletionRequestedAt <= (now - 30 days)`, and frontend banner displays the computed 30-day purge date with an OWNER cancellation option.
+  4. Introduced typed domain errors in `@elder-care/core` (`ValidationError` 400, `AuthError` 401, `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, `UnprocessableEntityError` 422, `RateLimitError` 429, `ServiceUnavailableError` 503) and converted all plain `throw new Error(...)` calls across services.
+  5. Refactored `rate-limiter.ts` to connect eagerly / await connection to Redis and execute `INCR` and `EXPIRE` atomically via an in-database Lua script, guaranteeing that every key has an associated TTL even under client interruptions.
+- **Rationale**: Guarantees database-level audit immutability, data lifecycle correctness, predictable HTTP error codes, and race-free rate limiting.
+
+
 
 

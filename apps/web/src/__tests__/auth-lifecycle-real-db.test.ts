@@ -110,13 +110,25 @@ describe('Real Database Integration: User Auth, Profile Creation & Immediate Ses
     const activeSessionsBefore = await listUserSessions(user.id);
     expect(activeSessionsBefore.length).toBeGreaterThanOrEqual(2);
 
-    // Request reset
+    // Request reset (must never leak rawToken in any environment)
     const resetReq = await requestPasswordReset(testEmail);
     expect(resetReq.success).toBe(true);
-    expect(resetReq.rawToken).toBeDefined();
+    expect((resetReq as any).rawToken).toBeUndefined();
+
+    // Create a known reset token directly to test token redemption & session revocation
+    const resetToken = 'test-token-lifecycle-session-revocation-token';
+    const { createHash } = await import('crypto');
+    const tokenHash = createHash('sha256').update(resetToken).digest('hex');
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 3600000),
+      },
+    });
 
     // Reset password
-    await resetPasswordWithToken(resetReq.rawToken!, 'BrandNewPassword123!');
+    await resetPasswordWithToken(resetToken, 'BrandNewPassword123!');
 
     // All previous sessions must be revoked in database
     const s1Validation = await validateSession(session1);

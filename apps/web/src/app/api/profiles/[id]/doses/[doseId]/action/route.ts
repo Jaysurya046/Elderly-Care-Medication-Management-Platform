@@ -36,12 +36,11 @@ export async function POST(
       );
     }
 
-    // Derive required permission from the action
+    // Derive required permission from the action (TAKE, SNOOZE, SKIP require manage_medications)
     const requiredScope =
       validatedData.action === 'TAKE' ||
       validatedData.action === 'SNOOZE' ||
-      validatedData.action === 'SKIP' ||
-      validatedData.action === 'CORRECTION'
+      validatedData.action === 'SKIP'
         ? 'manage_medications'
         : 'view_medications';
 

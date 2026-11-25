@@ -3,11 +3,12 @@ import { prisma } from '@elder-care/db';
 export async function processAutoMissDoses(referenceTime: Date = new Date()): Promise<number> {
   let missedCount = 0;
 
-  // Bounded batch scanner (take: 100)
+  // Bounded batch scanner (take: 100) skipping inactive medicines
   const pendingDoses = await prisma.doseEvent.findMany({
     where: {
       status: { in: ['PENDING', 'SNOOZED'] },
       scheduledAt: { lte: referenceTime },
+      schedule: { medication: { isActive: true } },
     },
     take: 100,
     include: {

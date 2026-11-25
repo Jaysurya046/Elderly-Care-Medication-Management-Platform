@@ -254,6 +254,14 @@ export async function recordDoseAction(
       updateWhere.stockDecremented = false;
     }
 
+    const snoozeMinutes = doseEvent.schedule?.snoozeMinutes || 15;
+    const snoozedUntil =
+      input.action === 'SNOOZE'
+        ? new Date(now.getTime() + snoozeMinutes * 60 * 1000)
+        : transitionResult.newStatus === 'SNOOZED'
+        ? (doseEvent as any).snoozedUntil
+        : null;
+
     const res = await tx.doseEvent.updateMany({
       where: updateWhere,
       data: {
@@ -261,6 +269,7 @@ export async function recordDoseAction(
         actedAt: now,
         actedByMembershipId: membership.id,
         snoozeCount: transitionResult.newSnoozeCount,
+        snoozedUntil,
         note: input.note || input.skipReason || doseEvent.note,
         ...(shouldDecrement ? { stockDecremented: true } : {}),
       },
@@ -286,11 +295,18 @@ export async function recordDoseAction(
     }
 
     // 2. Atomic stock decrement with a zero floor: never write an absolute value
-    if (shouldDecrement) {
-      await tx.medication.updateMany({
-        where: { id: medicationId, stockCount: { gt: 0 } },
-        data: { stockCount: { decrement: 1 } },
-      });
+    if (shouldDecrement && medicationId) {
+      if (tx.medication?.updateMany) {
+        await tx.medication.updateMany({
+          where: { id: medicationId, stockCount: { gt: 0 } },
+          data: { stockCount: { decrement: 1 } },
+        });
+      } else if (tx.medication?.update) {
+        await tx.medication.update({
+          where: { id: medicationId },
+          data: { stockCount: { decrement: 1 } },
+        });
+      }
     }
 
     // 3. Record append-only DoseEventAction history
@@ -393,6 +409,22 @@ export async function updateMedication(
     },
   });
 
+  // Deactivating a medicine cancels its future PENDING/SNOOZED doses
+  if (input.isActive === false) {
+    const now = new Date();
+    await prisma.doseEvent.updateMany({
+      where: {
+        schedule: { medicationId },
+        scheduledAt: { gte: now },
+        status: { in: ['PENDING', 'SNOOZED'] },
+      },
+      data: {
+        status: 'SKIPPED',
+        note: 'Cancelled: Medication deactivated',
+      },
+    });
+  }
+
   await recordAuditLog({
     profileId,
     actorUserId: membership.userId,
@@ -427,6 +459,20 @@ export async function deleteMedication(
   const softDeleted = await prisma.medication.update({
     where: { id: medicationId },
     data: { isActive: false },
+  });
+
+  // Deactivating a medicine cancels its future PENDING/SNOOZED doses
+  const now = new Date();
+  await prisma.doseEvent.updateMany({
+    where: {
+      schedule: { medicationId },
+      scheduledAt: { gte: now },
+      status: { in: ['PENDING', 'SNOOZED'] },
+    },
+    data: {
+      status: 'SKIPPED',
+      note: 'Cancelled: Medication deactivated',
+    },
   });
 
   await recordAuditLog({

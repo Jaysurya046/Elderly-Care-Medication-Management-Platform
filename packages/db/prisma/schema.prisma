@@ -222,6 +222,7 @@ model DoseEvent {
   scheduledAt         DateTime          @db.Timestamptz(6)
   status              DoseStatus        @default(PENDING)
   snoozeCount         Int               @default(0)
+  snoozedUntil        DateTime?         @db.Timestamptz(6)
   actedAt             DateTime?         @db.Timestamptz(6)
   actedByMembershipId String?           @db.Uuid
   note                String?

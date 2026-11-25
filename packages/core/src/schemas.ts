@@ -33,10 +33,9 @@ export const updateCareProfileSchema = z.object({
 });
 
 export const doseActionSchema = z.object({
-  action: z.enum(['TAKE', 'SNOOZE', 'SKIP', 'CORRECTION']),
+  action: z.enum(['TAKE', 'SNOOZE', 'SKIP']),
   note: z.string().max(1000).optional(),
   skipReason: z.string().max(1000).optional(),
-  correctionTargetStatus: z.enum(['TAKEN', 'LATE_TAKEN', 'SKIPPED', 'MISSED', 'PENDING']).optional(),
 });
 
 export const createCareNoteSchema = z.object({
@@ -134,7 +133,7 @@ export const createAppointmentSchema = z.object({
 
 export const doseCorrectionSchema = z.object({
   targetStatus: z.enum(['TAKEN', 'LATE_TAKEN', 'SKIPPED', 'MISSED', 'PENDING']),
-  reason: z.string().min(1, 'Reason is required for dose correction').max(1000),
+  reason: z.string().trim().min(1, 'Reason is required for dose correction').max(1000),
 });
 
 export function formatZodError(error: z.ZodError): Record<string, string> {

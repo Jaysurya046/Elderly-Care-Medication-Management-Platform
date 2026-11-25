@@ -305,7 +305,7 @@ describe('Phase 8c Part 2: Snooze, Deactivation, and Correction Route Separation
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.success).toBe(false);
-      expect(data.error || JSON.stringify(data.details)).toMatch(/CORRECTION|invalid/i);
+      expect(JSON.stringify(data.errors || data.error)).toMatch(/action|invalid/i);
     });
 
     it('correction route requires mandatory reason', async () => {
@@ -328,7 +328,7 @@ describe('Phase 8c Part 2: Snooze, Deactivation, and Correction Route Separation
       expect(res.status).toBe(400);
       const data = await res.json();
       expect(data.success).toBe(false);
-      expect(data.error || JSON.stringify(data.details)).toMatch(/reason/i);
+      expect(JSON.stringify(data.errors || data.error)).toMatch(/reason/i);
     });
 
     it('correction route succeeds with valid target status and reason', async () => {

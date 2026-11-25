@@ -18,6 +18,7 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     where: {
       status: { in: ['PENDING', 'SNOOZED'] },
       scheduledAt: { lte: referenceTime },
+      schedule: { medication: { isActive: true } },
     },
     take: 100, // Take the scan in bounded batches
     include: {
@@ -53,15 +54,26 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     }
   }
 
-  // 2. Scan for doses due soon (window: from now to now + 15 minutes) or currently due
+  // 2. Scan for doses due soon (window: from now to now + 15 minutes) or currently due, plus snoozed doses
   const upcomingWindow = new Date(referenceTime.getTime() + 15 * 60 * 1000);
   const eligibleDoses = await prisma.doseEvent.findMany({
     where: {
-      status: 'PENDING',
-      scheduledAt: {
-        gte: new Date(referenceTime.getTime() - 5 * 60 * 1000), // recent window
-        lte: upcomingWindow,
-      },
+      schedule: { medication: { isActive: true } },
+      OR: [
+        {
+          status: 'PENDING',
+          scheduledAt: {
+            gte: new Date(referenceTime.getTime() - 5 * 60 * 1000), // recent window
+            lte: upcomingWindow,
+          },
+        },
+        {
+          status: 'SNOOZED',
+          snoozedUntil: {
+            lte: referenceTime,
+          },
+        },
+      ],
     },
     include: {
       profile: {
@@ -111,8 +123,8 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
       profileId: profile.id,
       recipientUserId: recipient.id,
       type: 'UPCOMING_DOSE',
-      entityId: first.id,
-      scheduledAtUtc: first.scheduledAt,
+      entityId: first.status === 'SNOOZED' ? `${first.id}_snooze_${first.snoozeCount}` : first.id,
+      scheduledAtUtc: (first as any).snoozedUntil || first.scheduledAt,
     });
 
     // Check if already notified

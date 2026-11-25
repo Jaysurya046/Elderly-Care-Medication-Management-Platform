@@ -9,6 +9,7 @@ import { processLowStockAlerts } from './jobs/low-stock.job';
 import { processAppointmentReminders } from './jobs/appointment-reminders.job';
 import { processScheduledDeletions } from './jobs/scheduled-deletion.job';
 import { processAutoMissDoses } from './jobs/auto-miss.job';
+import { processNotificationRetries } from './jobs/notification-retries.job';
 
 const logger = pino({
   name: 'eldercare-worker',
@@ -108,6 +109,16 @@ export async function registerRepeatableJobs() {
     }
   );
 
+  // 8. Process Notification Retries (Every 2 minutes)
+  await reminderQueue.add(
+    'scan-notification-retries',
+    {},
+    {
+      repeat: { pattern: '*/2 * * * *' },
+      jobId: 'scan-notification-retries-repeat',
+    }
+  );
+
   logger.info('Repeatable cron schedules successfully registered.');
 }
 
@@ -160,6 +171,12 @@ export function startWorker() {
           const deleted = await processScheduledDeletions();
           logger.info({ deleted }, 'Processed scheduled account deletions');
           return { deleted };
+        }
+
+        case 'scan-notification-retries': {
+          const retried = await processNotificationRetries();
+          logger.info({ retried }, 'Processed notification retries');
+          return { retried };
         }
 
         default:

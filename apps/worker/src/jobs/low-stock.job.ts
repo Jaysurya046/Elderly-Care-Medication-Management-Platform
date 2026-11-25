@@ -16,12 +16,13 @@ function escapeHtml(text?: string | null): string {
 export async function processLowStockAlerts(referenceTime: Date = new Date()): Promise<number> {
   let alertsSent = 0;
 
-  // Medications at or below refill threshold
+  // Medications at or below refill threshold (bounded batch: 100)
   const lowStockMeds = await prisma.medication.findMany({
     where: {
       isActive: true,
       stockCount: { lte: prisma.medication.fields?.refillThreshold || 5 },
     },
+    take: 100, // Bounded batch
     include: {
       profile: {
         include: {
@@ -80,17 +81,26 @@ export async function processLowStockAlerts(referenceTime: Date = new Date()): P
         appUrl: `${appBaseUrl}/dashboard/medications`,
       });
 
-      const notifLog = await prisma.notificationLog.create({
-        data: {
-          profileId: med.profileId,
-          recipientUserId: recipient.id,
-          type: 'LOW_STOCK',
-          referenceKey: refKey,
-          channel: 'EMAIL',
-          status: 'PENDING',
-          attempts: 1,
-        },
-      });
+      let notifLog;
+      try {
+        notifLog = await prisma.notificationLog.create({
+          data: {
+            profileId: med.profileId,
+            recipientUserId: recipient.id,
+            type: 'LOW_STOCK',
+            referenceKey: refKey,
+            channel: 'EMAIL',
+            status: 'PENDING',
+            attempts: 1,
+          },
+        });
+      } catch (err: any) {
+        // Gracefully handle concurrent worker unique-key race (P2002)
+        if (err?.code === 'P2002' || err?.message?.includes('Unique constraint')) {
+          continue;
+        }
+        throw err;
+      }
 
       const sendResult = await sendEmail({
         to: recipient.email,

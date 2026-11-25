@@ -1,6 +1,6 @@
 import { rrulestr } from 'rrule';
-import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
-import { addDays, parseISO, startOfDay, endOfDay, setHours, setMinutes, setSeconds } from 'date-fns';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import { addDays, parseISO, startOfDay, endOfDay } from 'date-fns';
 
 export interface ScheduleInput {
   id: string;
@@ -38,6 +38,24 @@ export function classifyTimeOfDayBlock(
   return 'BEDTIME';
 }
 
+function parseLocalDateParts(
+  dateInput: Date | string,
+  tz: string
+): { year: number; month: number; day: number; dateStr: string } {
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    const [y, m, d] = dateInput.split('-').map(Number);
+    return { year: y, month: m, day: d, dateStr: dateInput };
+  }
+
+  const dateObj = typeof dateInput === 'string' ? parseISO(dateInput) : dateInput;
+  const zoned = toZonedTime(dateObj, tz);
+  const year = zoned.getFullYear();
+  const month = zoned.getMonth() + 1;
+  const day = zoned.getDate();
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { year, month, day, dateStr };
+}
+
 /**
  * Expands a schedule across a target window (e.g. next 14 days) in the profile's timezone,
  * correctly handling DST transitions, leap years, and midnight rollovers.
@@ -50,62 +68,63 @@ export function expandSchedule(
   const slots: GeneratedDoseSlot[] = [];
   const tz = schedule.timezone || 'Asia/Kolkata';
 
-  const scheduleStartDate = typeof schedule.startsOn === 'string'
-    ? parseISO(schedule.startsOn)
-    : schedule.startsOn;
+  // Local date components for startsOn and window
+  const startParts = parseLocalDateParts(schedule.startsOn, tz);
+  const windowStartParts = parseLocalDateParts(windowStart, tz);
+  const windowEndParts = parseLocalDateParts(windowEnd, tz);
 
-  const scheduleEndDate = schedule.endsOn
-    ? typeof schedule.endsOn === 'string'
-      ? parseISO(schedule.endsOn)
-      : schedule.endsOn
+  const localStartUtc = fromZonedTime(`${startParts.dateStr}T00:00:00`, tz);
+  const localEndUtc = schedule.endsOn
+    ? fromZonedTime(`${parseLocalDateParts(schedule.endsOn, tz).dateStr}T23:59:59`, tz)
     : null;
-
-  // We operate on calendar dates in the local timezone
-  const localWindowStart = toZonedTime(windowStart, tz);
-  const localWindowEnd = toZonedTime(windowEnd, tz);
 
   // Parse RRULE
   let rule;
+  const rruleDtStart = new Date(Date.UTC(startParts.year, startParts.month - 1, startParts.day, 12, 0, 0));
+
   try {
-    // If rrule doesn't start with RRULE: prefix, rrulestr can handle it
     const ruleString = schedule.rrule.startsWith('RRULE:')
       ? schedule.rrule
       : `RRULE:${schedule.rrule}`;
     rule = rrulestr(ruleString, {
-      dtstart: scheduleStartDate,
+      dtstart: rruleDtStart,
     });
   } catch (err) {
-    // Fallback simple daily if parsing fails
     rule = rrulestr('RRULE:FREQ=DAILY;INTERVAL=1', {
-      dtstart: scheduleStartDate,
+      dtstart: rruleDtStart,
     });
   }
 
-  // Generate recurrence occurrences between range
-  const rangeStart = scheduleStartDate > localWindowStart ? scheduleStartDate : localWindowStart;
-  const occurrences = rule.between(startOfDay(rangeStart), endOfDay(localWindowEnd), true);
+  // Define synthetic UTC bounds for RRULE expansion (add 1 day padding on each side)
+  const evalStart = new Date(
+    Date.UTC(windowStartParts.year, windowStartParts.month - 1, windowStartParts.day - 1, 0, 0, 0)
+  );
+  const rruleStart = evalStart < rruleDtStart ? rruleDtStart : evalStart;
+
+  const evalEnd = new Date(
+    Date.UTC(windowEndParts.year, windowEndParts.month - 1, windowEndParts.day + 1, 23, 59, 59)
+  );
+
+  const occurrences = rule.between(rruleStart, evalEnd, true);
 
   for (const occurrence of occurrences) {
-    // Format local date YYYY-MM-DD
-    const dateStr = format(occurrence, 'yyyy-MM-dd', { timeZone: tz });
+    const occYear = occurrence.getUTCFullYear();
+    const occMonth = String(occurrence.getUTCMonth() + 1).padStart(2, '0');
+    const occDay = String(occurrence.getUTCDate()).padStart(2, '0');
+    const dateStr = `${occYear}-${occMonth}-${occDay}`;
 
     for (const timeStr of schedule.timesOfDay) {
-      const [h, m] = timeStr.split(':').map((x) => parseInt(x, 10));
+      // Direct zoned-to-UTC conversion without host machine timezone pollution
+      const utcInstant = fromZonedTime(`${dateStr}T${timeStr}:00`, tz);
 
-      // Construct the local zoned time for this dose
-      let localDateTime = toZonedTime(new Date(`${dateStr}T12:00:00Z`), tz);
-      localDateTime = setHours(localDateTime, h);
-      localDateTime = setMinutes(localDateTime, m);
-      localDateTime = setSeconds(localDateTime, 0);
-
-      // Convert back to UTC instant for database storage
-      const utcInstant = fromZonedTime(localDateTime, tz);
-
-      // Check bounds
+      // Check window bounds
       if (utcInstant < windowStart || utcInstant > windowEnd) {
         continue;
       }
-      if (scheduleEndDate && utcInstant > scheduleEndDate) {
+      if (utcInstant < localStartUtc) {
+        continue;
+      }
+      if (localEndUtc && utcInstant > localEndUtc) {
         continue;
       }
 

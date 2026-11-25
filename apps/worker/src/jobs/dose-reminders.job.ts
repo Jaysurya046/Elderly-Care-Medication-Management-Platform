@@ -3,11 +3,12 @@ import {
   generateNotificationReferenceKey,
   composeDoseReminderMessage,
   isWithinQuietHours,
+  getAdjustedNotificationTime,
   ReminderType,
 } from '@elder-care/core';
 import { format, toZonedTime } from 'date-fns-tz';
 import { sendEmail } from '../email-sender';
-import { DoseReminderEmail } from '@elder-care/email';
+import { DoseReminderEmail, DoseDueNowEmail } from '@elder-care/email';
 import React from 'react';
 
 export async function processDoseReminders(referenceTime: Date = new Date()): Promise<number> {
@@ -20,7 +21,7 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
       scheduledAt: { lte: referenceTime },
       schedule: { medication: { isActive: true } },
     },
-    take: 100, // Take the scan in bounded batches
+    take: 100, // Bounded batch
     include: {
       schedule: true,
       profile: true,
@@ -32,7 +33,6 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     const expiryTime = new Date(dose.scheduledAt.getTime() + graceMs);
 
     if (referenceTime >= expiryTime) {
-      // Worker auto-miss must be conditional updateMany and only write DoseEventAction row if count === 1
       const res = await prisma.doseEvent.updateMany({
         where: {
           id: dose.id,
@@ -54,8 +54,13 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     }
   }
 
-  // 2. Scan for doses due soon (window: from now to now + 15 minutes) or currently due, plus snoozed doses
+  // 2. Scan for eligible doses:
+  // - Upcoming doses in the next 15 minutes
+  // - Currently due doses in recent window (up to 12 hours ago to capture quiet-hours deferred doses)
+  // - Snoozed doses whose snoozedUntil has arrived
   const upcomingWindow = new Date(referenceTime.getTime() + 15 * 60 * 1000);
+  const lookbackWindow = new Date(referenceTime.getTime() - 12 * 60 * 60 * 1000);
+
   const eligibleDoses = await prisma.doseEvent.findMany({
     where: {
       schedule: { medication: { isActive: true } },
@@ -63,7 +68,7 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
         {
           status: 'PENDING',
           scheduledAt: {
-            gte: new Date(referenceTime.getTime() - 5 * 60 * 1000), // recent window
+            gte: lookbackWindow,
             lte: upcomingWindow,
           },
         },
@@ -75,6 +80,7 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
         },
       ],
     },
+    take: 100, // Bounded batch
     include: {
       profile: {
         include: {
@@ -110,20 +116,34 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
     const tz = profile.timezone || 'Asia/Kolkata';
     const hasCritical = doses.some((d) => d.schedule.medication.criticality === 'CRITICAL');
 
-    // Quiet hours check
-    if (!hasCritical && isWithinQuietHours(first.scheduledAt, tz)) {
-      continue; // Deferred until 06:30
+    // Quiet hours handling:
+    // If dose was scheduled during quiet hours, it is deferred to 06:30 local time
+    const adjusted = getAdjustedNotificationTime(first.scheduledAt, hasCritical, tz);
+    if (adjusted.wasDeferred && referenceTime < adjusted.dispatchAtUtc) {
+      continue; // Still within quiet hours window; deferred until 06:30
+    }
+
+    // If currently within quiet hours for this profile and non-critical, do not send
+    if (!hasCritical && isWithinQuietHours(referenceTime, tz)) {
+      continue;
     }
 
     const localZoned = toZonedTime(first.scheduledAt, tz);
     const localTimeStr = format(localZoned, 'hh:mm a', { timeZone: tz });
 
-    // Derive deterministic referenceKey for idempotency across repeated runs
+    // Determine notification type: DOSE_DUE_NOW at/after scheduled time, UPCOMING_DOSE 15 mins prior
+    const isDueNow = referenceTime >= first.scheduledAt || first.status === 'SNOOZED';
+    const notifType: ReminderType = isDueNow ? 'DOSE_DUE_NOW' : 'UPCOMING_DOSE';
+
+    const entityIdentifier = first.status === 'SNOOZED'
+      ? `${first.id}_snooze_${first.snoozeCount}`
+      : first.id;
+
     const refKey = generateNotificationReferenceKey({
       profileId: profile.id,
       recipientUserId: recipient.id,
-      type: 'UPCOMING_DOSE',
-      entityId: first.status === 'SNOOZED' ? `${first.id}_snooze_${first.snoozeCount}` : first.id,
+      type: notifType,
+      entityId: entityIdentifier,
       scheduledAtUtc: (first as any).snoozedUntil || first.scheduledAt,
     });
 
@@ -136,34 +156,56 @@ export async function processDoseReminders(referenceTime: Date = new Date()): Pr
       continue; // Idempotent skip
     }
 
-    // Compose message following privacy rules (Section 1, Principle 5)
     const medicineNames = doses.map((d) => d.schedule.medication.name);
-    const { subject } = composeDoseReminderMessage({
-      localTimeStr,
-      count: doses.length,
-      emailShowsMedicineNames: profile.emailShowsMedicineNames,
-      medicineNames,
-    });
-
     const appBaseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-    const template = React.createElement(DoseReminderEmail, {
-      displayName: profile.displayName,
-      localTimeStr,
-      appUrl: `${appBaseUrl}/senior`,
-      emailShowsMedicineNames: profile.emailShowsMedicineNames,
-      medicines: doses.map((d) => ({
-        name: d.schedule.medication.name,
-        strength: d.schedule.medication.strength,
-        instructions: d.schedule.medication.instructions,
-      })),
-    });
+
+    let subject: string;
+    let template: React.ReactElement;
+
+    if (notifType === 'DOSE_DUE_NOW') {
+      subject = profile.emailShowsMedicineNames
+        ? `Medication Due Now: ${localTimeStr} (${medicineNames.join(', ')})`
+        : `Medication Due Now: ${localTimeStr}`;
+
+      template = React.createElement(DoseDueNowEmail, {
+        displayName: profile.displayName,
+        localTimeStr,
+        appUrl: `${appBaseUrl}/senior`,
+        emailShowsMedicineNames: profile.emailShowsMedicineNames,
+        medicines: doses.map((d) => ({
+          name: d.schedule.medication.name,
+          strength: d.schedule.medication.strength,
+          instructions: d.schedule.medication.instructions,
+        })),
+      });
+    } else {
+      const msg = composeDoseReminderMessage({
+        localTimeStr,
+        count: doses.length,
+        emailShowsMedicineNames: profile.emailShowsMedicineNames,
+        medicineNames,
+      });
+      subject = msg.subject;
+
+      template = React.createElement(DoseReminderEmail, {
+        displayName: profile.displayName,
+        localTimeStr,
+        appUrl: `${appBaseUrl}/senior`,
+        emailShowsMedicineNames: profile.emailShowsMedicineNames,
+        medicines: doses.map((d) => ({
+          name: d.schedule.medication.name,
+          strength: d.schedule.medication.strength,
+          instructions: d.schedule.medication.instructions,
+        })),
+      });
+    }
 
     // Record pending notification log
     const notifLog = await prisma.notificationLog.create({
       data: {
         profileId: profile.id,
         recipientUserId: recipient.id,
-        type: 'UPCOMING_DOSE',
+        type: notifType,
         referenceKey: refKey,
         channel: 'EMAIL',
         status: 'PENDING',

@@ -15,7 +15,7 @@ function escapeHtml(text?: string | null): string {
 export async function processAppointmentReminders(referenceTime: Date = new Date()): Promise<number> {
   let remindersSent = 0;
 
-  // Upcoming scheduled appointments in the next 8 days
+  // Upcoming scheduled appointments in the next 8 days (bounded query)
   const futureWindow = new Date(referenceTime.getTime() + 8 * 24 * 60 * 60 * 1000);
   const appointments = await prisma.appointment.findMany({
     where: {
@@ -25,6 +25,7 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
         lte: futureWindow,
       },
     },
+    take: 100, // Bounded batch
     include: {
       profile: {
         include: {
@@ -49,9 +50,9 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
     const localZoned = toZonedTime(appt.startsAt, tz);
     const formattedDate = format(localZoned, 'EEEE, MMM d, yyyy h:mm a', { timeZone: tz });
 
+    // 1. Standard offset reminders (7 days, 1 day, 2 hours)
     for (const offset of offsets) {
       const triggerTime = new Date(appt.startsAt.getTime() - offset * 60 * 1000);
-      // Check if reference time has reached trigger time and is within a 30-minute window
       const diffMs = referenceTime.getTime() - triggerTime.getTime();
       if (diffMs < 0 || diffMs > 30 * 60 * 1000) {
         continue;
@@ -119,6 +120,78 @@ export async function processAppointmentReminders(referenceTime: Date = new Date
 
         if (sendResult.success) {
           remindersSent++;
+        }
+      }
+    }
+
+    // 2. Travel-aware 'leave by' alert
+    if (appt.travelMinutes && appt.travelMinutes > 0) {
+      const leaveByTime = new Date(appt.startsAt.getTime() - appt.travelMinutes * 60 * 1000);
+      const leaveDiffMs = referenceTime.getTime() - leaveByTime.getTime();
+
+      // Trigger if referenceTime has reached leaveByTime within 30-minute window
+      if (leaveDiffMs >= 0 && leaveDiffMs <= 30 * 60 * 1000) {
+        const eligibleMembers = appt.profile.memberships.filter((m) => {
+          if (!appt.isPrivate) return true;
+          if (m.role === 'OWNER') return true;
+          const scopes = (m.scopes as any) || {};
+          return Array.isArray(scopes) ? scopes.includes('view_private_items') : Boolean(scopes.view_private_items);
+        });
+
+        for (const membership of eligibleMembers) {
+          const recipient = membership.user;
+          const refKey = `APPT_LEAVE_BY_${appt.id}_${recipient.id}`;
+
+          const existingLog = await prisma.notificationLog.findUnique({
+            where: { referenceKey: refKey },
+          });
+
+          if (existingLog) continue;
+
+          const showDetails = appt.profile.emailShowsMedicineNames !== false;
+          const elderName = escapeHtml(appt.profile.displayName);
+          const apptTitle = escapeHtml(appt.title);
+          const doctorName = escapeHtml(appt.doctorName);
+          const locationName = escapeHtml(appt.clinicName || appt.address || 'Clinic');
+
+          const subject = showDetails
+            ? `Time to leave: Appointment with ${doctorName} for ${elderName}`
+            : `Time to leave for upcoming medical appointment for ${elderName}`;
+
+          const textContent = showDetails
+            ? `Time to leave for appointment "${apptTitle}" with ${doctorName} at ${locationName}. Estimated travel time is ${appt.travelMinutes} minutes. View details: ${appBaseUrl}/dashboard/appointments`
+            : `Time to leave for upcoming medical appointment for ${elderName}. Estimated travel time is ${appt.travelMinutes} minutes. Open the app to view doctor and location details: ${appBaseUrl}/dashboard/appointments`;
+
+          const notifLog = await prisma.notificationLog.create({
+            data: {
+              profileId: appt.profileId,
+              recipientUserId: recipient.id,
+              type: 'APPOINTMENT_LEAVE_BY',
+              referenceKey: refKey,
+              channel: 'EMAIL',
+              status: 'PENDING',
+              attempts: 1,
+            },
+          });
+
+          const sendResult = await sendEmail({
+            to: recipient.email,
+            subject,
+            text: textContent,
+          });
+
+          await prisma.notificationLog.update({
+            where: { id: notifLog.id },
+            data: {
+              status: sendResult.success ? 'SENT' : 'FAILED',
+              sentAt: sendResult.success ? new Date() : null,
+              error: sendResult.error || null,
+            },
+          });
+
+          if (sendResult.success) {
+            remindersSent++;
+          }
         }
       }
     }

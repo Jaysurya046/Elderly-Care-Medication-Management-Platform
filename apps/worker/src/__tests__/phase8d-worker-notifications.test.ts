@@ -16,6 +16,9 @@ vi.mock('@elder-care/db', () => ({
     appointment: {
       findMany: vi.fn(),
     },
+    user: {
+      findUnique: vi.fn(),
+    },
     notificationLog: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),

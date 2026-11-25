@@ -129,7 +129,7 @@ describe('Phase 4: Background Worker Job Handlers', () => {
       expect(sent).toBe(1);
       expect(sendEmail).toHaveBeenCalledTimes(1);
       // Privacy check: emailShowsMedicineNames is false, so subject must hide drug name
-      expect(vi.mocked(sendEmail).mock.calls[0][0].subject).toBe('Medication Reminder: 11:00 PM');
+      expect(vi.mocked(sendEmail).mock.calls[0][0].subject).toMatch(/Medication (Reminder|Due Now): 11:00 PM/);
       expect(vi.mocked(sendEmail).mock.calls[0][0].subject).not.toContain('Insulin');
     });
   });

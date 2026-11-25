@@ -18,9 +18,16 @@ describe('Real Database Integration: User Auth, Profile Creation & Immediate Ses
 
   beforeAll(async () => {
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL connection timed out after 2500ms')), 2500)),
+      ]);
       isDbAvailable = true;
-    } catch {
+    } catch (err) {
+      const isDbRequired = process.env.REQUIRE_DB?.trim() === '1' || process.env.CI?.trim() === 'true';
+      if (isDbRequired) {
+        throw new Error(`Real database required (REQUIRE_DB=1 or CI=true) but connection failed: ${(err as Error).message}`);
+      }
       console.warn('Real Postgres database not reachable, skipping live DB auth lifecycle test');
       return;
     }
@@ -41,6 +48,10 @@ describe('Real Database Integration: User Auth, Profile Creation & Immediate Ses
 
   it('runs complete lifecycle: signup -> profile creation -> signin -> session revocation -> rejected on next request', async () => {
     if (!isDbAvailable) {
+      const isDbRequired = process.env.REQUIRE_DB?.trim() === '1' || process.env.CI?.trim() === 'true';
+      if (isDbRequired) {
+        throw new Error('Real database required but unavailable');
+      }
       console.warn('Skipping test because real database is not available');
       return;
     }

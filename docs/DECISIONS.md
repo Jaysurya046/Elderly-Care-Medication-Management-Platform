@@ -208,17 +208,18 @@ This document records architectural, technical, and domain decisions made throug
   6. Session tokens stored strictly as SHA-256 hashes at rest in PostgreSQL, capturing `ip` and `userAgent`.
 - **Rationale**: Direct compliance with Phase 8a audit corrections.
 
-### DEC-022: Audit Immutability FK Decoupling, 30-Day Purge Lifecycle, Typed Domain Errors, and Atomic Lua Rate Limiter (Phase 8b)
-- **Date**: 2026-11-24
+### DEC-023: Rate Limiter Infrastructure 503 vs 429 Differentiation, Real Redis Recovery, and Bounded Scheduled Deletion Hardening (Phase 8b-fix)
+- **Date**: 2026-11-25
 - **Status**: Accepted
-- **Context**: Audit log append-only trigger conflicts on profile deletion, soft deletion timestamp semantics, standard HTTP domain error mapping, and rate limiter concurrency guarantees.
+- **Context**: Ensuring rate limiter errors differentiate between infrastructure downtime (503 Service Unavailable) vs user quota exhaustion (429 Too Many Requests), making Redis client resilient to connection recovery and URL changes, hardening scheduled deletion worker against partial batch failures, revoking owner sessions, defining user account soft-deletion, and enforcing hard test failure when database is required.
 - **Decision**:
-  1. Dropped `onDelete: SetNull` and the foreign key constraint from `audit_logs` to `care_profiles` (`20261122030000_audit_log_drop_fk`). This prevents PostgreSQL cascade updates from violating the append-only trigger when a profile is purged, while preserving historical `profileId` references in audit rows.
-  2. Updated `packages/db/prisma/seed.ts` to replace `prisma.auditLog.deleteMany()` with a safe truncate check to prevent append-only trigger exceptions during database initialization.
-  3. Stored `deletionRequestedAt` as the exact request timestamp (`new Date()`), computing `hardDeleteDate` as `deletionRequestedAt + 30 days`. Scheduled deletion worker queries `deletionRequestedAt <= (now - 30 days)`, and frontend banner displays the computed 30-day purge date with an OWNER cancellation option.
-  4. Introduced typed domain errors in `@elder-care/core` (`ValidationError` 400, `AuthError` 401, `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, `UnprocessableEntityError` 422, `RateLimitError` 429, `ServiceUnavailableError` 503) and converted all plain `throw new Error(...)` calls across services.
-  5. Refactored `rate-limiter.ts` to connect eagerly / await connection to Redis and execute `INCR` and `EXPIRE` atomically via an in-database Lua script, guaranteeing that every key has an associated TTL even under client interruptions.
-- **Rationale**: Guarantees database-level audit immutability, data lifecycle correctness, predictable HTTP error codes, and race-free rate limiting.
+  1. Updated `rate-limiter.ts` to return `isDown: true` when Redis connectivity fails in production. Services (`auth-service.ts`, `care-circle-service.ts`) throw `ServiceUnavailableError` (HTTP 503) on infrastructure errors rather than `RateLimitError` (HTTP 429).
+  2. Implemented route-level HTTP status code verification for `/api/auth/signin` and `/api/auth/signup`: wrong password yields 401, duplicate email yields 409, Redis down in production yields 503, and 6th consecutive failed login yields 429.
+  3. Added real Redis verification testing that 1-5 attempts succeed, 6th attempt is blocked with `remaining: 0`, and key has a positive TTL in Redis. Hardened `getConnectedRedisClient` to recover after client disconnect/end events.
+  4. Hardened `processScheduledDeletions`: bounded batch of `take: 50`, per-profile `try/catch` with structured Pino error logging, cascading deletion of profile, medications, doses, and memberships, deletion of owner sessions, soft-deleting owner `User.deletedAt` if no remaining active memberships or profiles exist, and preserving append-only audit logs with original `profileId`.
+  5. Enforced that real database and Redis integration tests fail fast (2.5s connection timeout) and throw hard assertion errors when `REQUIRE_DB=1` or `CI=true` rather than silently skipping.
+- **Rationale**: Guarantees accurate HTTP semantics, service resilience under infrastructure disruption, and complete data lifecycle cleanup without audit log corruption.
+
 
 
 

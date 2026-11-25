@@ -5,6 +5,7 @@ import {
   ConflictError,
   ValidationError,
   RateLimitError,
+  ServiceUnavailableError,
 } from '@elder-care/core';
 import {
   hashSecret,
@@ -69,6 +70,11 @@ export async function authenticateWithPassword(
 
   const rateLimit = await checkRateLimit(rateLimitKey, 5, 900);
   if (!rateLimit.success) {
+    if (rateLimit.isDown) {
+      throw new ServiceUnavailableError(
+        rateLimit.error || 'Rate limiting service temporarily unavailable.'
+      );
+    }
     throw new RateLimitError(
       `Too many failed attempts. Account temporarily locked. Try again in ${Math.ceil(
         rateLimit.resetSeconds / 60
@@ -165,6 +171,11 @@ export async function verifyMemberPasscode(
   const rateLimitKey = `passcode:${membership.id}`;
   const rateLimit = await checkRateLimit(rateLimitKey, 5, 15 * 60);
   if (!rateLimit.success) {
+    if (rateLimit.isDown) {
+      throw new ServiceUnavailableError(
+        rateLimit.error || 'Rate limiting service temporarily unavailable.'
+      );
+    }
     return {
       success: false,
       error: 'Passcode locked due to 5 consecutive failures. Please try again in 15 minute(s).',
@@ -257,6 +268,11 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
 
   const rateLimit = await checkRateLimit(rateLimitKey, 3, 3600);
   if (!rateLimit.success) {
+    if (rateLimit.isDown) {
+      throw new ServiceUnavailableError(
+        rateLimit.error || 'Rate limiting service temporarily unavailable.'
+      );
+    }
     throw new RateLimitError('Too many password reset requests. Please wait an hour before trying again.');
   }
 

@@ -13,7 +13,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **26 test files, 151 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm test` | ✅ PASS | **27 test files, 167 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
 | `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
 | `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
@@ -179,5 +179,18 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **4. Deletion Cancellation & Banner** | ✅ Complete | Dashboard banner computes and displays the scheduled 30-day purge date with an active OWNER cancellation button (`/api/profiles/[id]/delete` DELETE) that resets `deletionRequestedAt: null`. |
 | **5. Typed Domain Errors Across Services** | ✅ Complete | Defined `AppError`, `ValidationError` (400), `AuthError` (401), `ForbiddenError` (403), `NotFoundError` (404), `ConflictError` (409), `UnprocessableEntityError` (422), `RateLimitError` (429), and `ServiceUnavailableError` (503) in `@elder-care/core`. Replaced plain `throw new Error(...)` across `auth-service.ts`, `medication-service.ts`, `care-circle-service.ts`, and `appointment-service.ts`. |
 | **6. Atomic Lua Script & Eager Rate Limiter** | ✅ Complete | Refactored `rate-limiter.ts` to await Redis connectivity and execute `INCR` + `EXPIRE` atomically via an in-database Lua script, guaranteeing that no key is ever created without a TTL. Fails closed (503) in production when Redis is unreachable (`phase8b-deletion-errors.test.ts`). |
+
+---
+
+## 12. Phase 8b-Fix: Rate Limiter Infrastructure Differentiation, Real Redis Verification & Scheduled Deletions Hardening
+
+| Phase 8b-Fix Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Fail-Fast DB Timeout & REQUIRE_DB Enforcement** | ✅ Complete | Added 2500ms connection timeout via `Promise.race` across `concurrency-real-db.test.ts`, `auth-lifecycle-real-db.test.ts`, and `phase8b-deletion-errors.test.ts`. Tests throw hard failures immediately when `REQUIRE_DB=1` or `CI=true` and database is unreachable, with live output logging initial and final stock values and purge row counts. |
+| **2. Infrastructure Error 503 vs 429 Separation** | ✅ Complete | `rate-limiter.ts` returns `isDown: true` when Redis connectivity fails in production. `auth-service.ts` and `care-circle-service.ts` throw `ServiceUnavailableError` (HTTP 503) rather than `RateLimitError` (HTTP 429) on infrastructure errors. |
+| **3. Route-Level Error Mapping** | ✅ Complete | Added test suite verifying exact HTTP status codes for auth endpoints: wrong password → 401 (`POST /api/auth/signin`), duplicate email → 409 (`POST /api/auth/signup`), Redis down in production → 503 (`POST /api/auth/signin`), and sixth consecutive failed login → 429 (`POST /api/auth/signin`). |
+| **4. Real Redis Rate Limiting & Reconnect Recovery** | ✅ Complete | Replaced static string matching with a functional Redis test asserting that calls 1–5 succeed, 6th call is blocked with `remaining: 0`, and key has a valid TTL in Redis. Hardened `getConnectedRedisClient` to recover after client disconnect/end events and environment URL switches. |
+| **5. Hardened processScheduledDeletions** | ✅ Complete | Hardened with bounded batch (`take: 50`), per-profile `try/catch` with Pino error logging, deletion of owner sessions, cascading deletion of care profile data, soft-deleting the owner's `User.deletedAt` if no remaining active memberships or profiles exist, and preserving append-only audit rows with intact `profileId`. |
+
 
 

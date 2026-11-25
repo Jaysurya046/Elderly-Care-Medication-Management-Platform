@@ -2,7 +2,22 @@ import Redis from 'ioredis';
 import { ServiceUnavailableError } from '@elder-care/core';
 
 let redisClient: Redis | null = null;
+let currentRedisUrl: string | undefined = undefined;
 const memoryStore = new Map<string, { count: number; expiresAt: number }>();
+
+/**
+ * Resets cached Redis client for test isolation and environment variable changes.
+ */
+export function _resetRedisClientForTesting(): void {
+  if (redisClient) {
+    try {
+      redisClient.disconnect();
+    } catch {}
+    redisClient = null;
+  }
+  currentRedisUrl = undefined;
+  memoryStore.clear();
+}
 
 /**
  * Atomic Lua script to execute INCR and EXPIRE atomically in a single round-trip.
@@ -19,19 +34,33 @@ return {current, ttl}
 
 /**
  * Connects eagerly or awaits connection to Redis when REDIS_URL is provided.
+ * Recovers automatically after Redis returns and handles URL changes.
  */
 export async function getConnectedRedisClient(): Promise<Redis | null> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) return null;
+
+  // If redisUrl has changed in the environment, disconnect previous client and reset
+  if (redisClient && currentRedisUrl !== redisUrl) {
+    try {
+      redisClient.disconnect();
+    } catch {}
+    redisClient = null;
+  }
+
+  currentRedisUrl = redisUrl;
 
   if (!redisClient) {
     try {
       redisClient = new Redis(redisUrl, {
         maxRetriesPerRequest: 1,
         lazyConnect: true,
-        retryStrategy: () => null, // Don't infinite retry if Redis is unreachable
+        connectTimeout: 2000,
+        retryStrategy: (times) => {
+          if (times > 3) return null;
+          return Math.min(times * 100, 1000);
+        },
       });
-      // Suppress unhandled EventEmitter errors on the client
       redisClient.on('error', () => {});
     } catch {
       return null;
@@ -42,8 +71,21 @@ export async function getConnectedRedisClient(): Promise<Redis | null> {
     return redisClient;
   }
 
-  if (redisClient.status === 'wait') {
+  if (
+    redisClient.status === 'wait' ||
+    redisClient.status === 'close' ||
+    redisClient.status === 'end'
+  ) {
     try {
+      if (redisClient.status === 'end') {
+        redisClient = new Redis(redisUrl, {
+          maxRetriesPerRequest: 1,
+          lazyConnect: true,
+          connectTimeout: 2000,
+          retryStrategy: () => null,
+        });
+        redisClient.on('error', () => {});
+      }
       await redisClient.connect();
       return redisClient;
     } catch {
@@ -59,6 +101,7 @@ export interface RateLimitResult {
   remaining: number;
   resetSeconds: number;
   error?: string;
+  isDown?: boolean;
 }
 
 /**
@@ -99,6 +142,7 @@ export async function checkRateLimit(
           remaining: 0,
           resetSeconds: windowSeconds,
           error: 'Rate limiting service temporarily unavailable. Please try again later.',
+          isDown: true,
         };
       }
     }
@@ -111,6 +155,7 @@ export async function checkRateLimit(
       remaining: 0,
       resetSeconds: windowSeconds,
       error: 'Rate limiting service temporarily unavailable. Please try again later.',
+      isDown: true,
     };
   }
 

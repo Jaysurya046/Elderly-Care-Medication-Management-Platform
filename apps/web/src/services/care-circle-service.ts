@@ -1,6 +1,12 @@
 import { prisma, Role, MembershipStatus, Membership, Invitation } from '@elder-care/db';
-import { DEFAULT_ROLE_SCOPES, Scopes } from '@elder-care/core';
+import {
+  DEFAULT_ROLE_SCOPES,
+  Scopes,
+  RateLimitError,
+  ServiceUnavailableError,
+} from '@elder-care/core';
 import { generateRandomToken, hashToken } from '../lib/crypto';
+import { checkRateLimit } from '../lib/rate-limiter';
 import {
   requireProfileAccess,
   ValidationError,
@@ -33,6 +39,17 @@ export async function createCareCircleInvitation(
     role: Role.OWNER,
     userIdOverride: actorUserId,
   });
+
+  const rateLimitKey = `rate_limit:invite:${profileId}`;
+  const rateLimit = await checkRateLimit(rateLimitKey, 10, 3600);
+  if (!rateLimit.success) {
+    if (rateLimit.isDown) {
+      throw new ServiceUnavailableError(
+        rateLimit.error || 'Rate limiting service temporarily unavailable.'
+      );
+    }
+    throw new RateLimitError('Too many invitation requests. Please try again later.');
+  }
 
   const normalizedEmail = input.email.toLowerCase().trim();
 
@@ -87,6 +104,17 @@ export async function acceptCareCircleInvitation(
   rawToken: string,
   currentUserId: string
 ): Promise<Membership> {
+  const rateLimitKey = `rate_limit:invite_accept:${currentUserId}`;
+  const rateLimit = await checkRateLimit(rateLimitKey, 10, 3600);
+  if (!rateLimit.success) {
+    if (rateLimit.isDown) {
+      throw new ServiceUnavailableError(
+        rateLimit.error || 'Rate limiting service temporarily unavailable.'
+      );
+    }
+    throw new RateLimitError('Too many invitation acceptance attempts. Please try again later.');
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: currentUserId },
   });

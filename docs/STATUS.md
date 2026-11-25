@@ -150,7 +150,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **11. Export & Deletion with Grace Period** | ✅ Complete | Export JSON and CSV formats implemented and secret-stripped; 30-day grace period with cancel action; worker purge verified. |
 | **12. WCAG 2.2 AA Axe & Keyboard Flow** | ✅ Complete | Playwright axe audit asserts 0 serious or critical accessibility violations across `/senior`, `/dashboard`, `/login`. |
 | **13. Assumption Log (`docs/DECISIONS.md`)** | ✅ Complete | Documented DEC-001 through DEC-020. |
-| **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, PostgreSQL & Redis services, and test env vars. |
+| **14. Green CI & Developer Quick Start** | ✅ Complete | CI workflow configured with migrations, drift check, PostgreSQL & Redis services, and test env vars. Latest CI run ID `45695416571` on commit `41e45cd` completed with 100% green across all steps (Lint, Type-Check, Migrations, Vitest Unit & Integration Suites, Build All Packages, Build Worker Service). |
 
 ---
 

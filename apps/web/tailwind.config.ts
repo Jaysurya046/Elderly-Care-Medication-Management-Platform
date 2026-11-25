@@ -9,16 +9,27 @@ const config: Config = {
     extend: {
       fontSize: {
         // Elder-care specific scale (Section 7: 18px base up to 28px)
-        'senior-base': ['18px', { lineHeight: '28px' }],
-        'senior-lg': ['22px', { lineHeight: '32px' }],
-        'senior-xl': ['26px', { lineHeight: '36px' }],
-        'senior-2xl': ['32px', { lineHeight: '42px' }],
+        'senior-base': ['1.125rem', { lineHeight: '1.75rem' }],
+        'senior-lg': ['1.375rem', { lineHeight: '2rem' }],
+        'senior-xl': ['1.625rem', { lineHeight: '2.25rem' }],
+        'senior-2xl': ['2rem', { lineHeight: '2.5rem' }],
       },
       colors: {
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        border: 'var(--border)',
+        primary: {
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
+        },
         senior: {
-          bg: '#f8fafc',
-          text: '#0f172a',
-          primary: '#1d4ed8',
+          bg: 'var(--background)',
+          text: 'var(--foreground)',
+          primary: 'var(--primary)',
           success: '#15803d',
           danger: '#b91c1c',
           warning: '#b45309',

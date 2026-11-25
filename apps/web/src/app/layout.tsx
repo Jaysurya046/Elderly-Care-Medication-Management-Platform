@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { LanguageProvider } from '@/lib/i18n';
+import { PwaRegister } from '@/components/pwa-register';
 
 export const metadata: Metadata = {
   title: 'Elder Care & Medication Management',
@@ -23,19 +25,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" data-text-size="normal">
       <head>
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased font-sans">
+      <body className="min-h-screen bg-background text-foreground antialiased font-sans">
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:p-4 focus:bg-blue-700 focus:text-white focus:rounded-lg focus:shadow-lg focus:text-lg focus:font-bold"
         >
           Skip to main content
         </a>
-        <main id="main-content">{children}</main>
+        <LanguageProvider>
+          <PwaRegister />
+          <main id="main-content">{children}</main>
+        </LanguageProvider>
       </body>
     </html>
   );

@@ -17,6 +17,13 @@ import {
   Lock,
 } from 'lucide-react';
 import { Badge, ReadAloudButton } from '@elder-care/ui';
+import {
+  syncOfflineQueueItems,
+  loadOfflineQueue,
+  saveOfflineQueue,
+  QueuedOfflineAction,
+} from '@/lib/offline-queue';
+import { useTranslation, LanguageSelector } from '@/lib/i18n';
 
 interface DoseItem {
   id: string;
@@ -78,8 +85,11 @@ export default function SeniorModePage() {
     return 'BEDTIME';
   };
 
-  // High Contrast mode toggle
+  const { t } = useTranslation();
+
+  // High Contrast mode toggle (WCAG AAA >= 7:1)
   React.useEffect(() => {
+    document.documentElement.setAttribute('data-high-contrast', String(highContrast));
     if (highContrast) {
       document.body.classList.add('high-contrast');
     } else {
@@ -87,8 +97,9 @@ export default function SeniorModePage() {
     }
   }, [highContrast]);
 
-  // Text Size scaling
+  // Root font-size scaling for text size
   React.useEffect(() => {
+    document.documentElement.setAttribute('data-text-size', textSize);
     document.body.classList.remove('text-large', 'text-xlarge');
     if (textSize === 'large') document.body.classList.add('text-large');
     if (textSize === 'xlarge') document.body.classList.add('text-xlarge');
@@ -96,50 +107,27 @@ export default function SeniorModePage() {
 
   // Load offline queue count
   const updateQueueCount = () => {
-    try {
-      const q = JSON.parse(localStorage.getItem('eldercare_offline_queue') || '[]');
-      setQueuedCount(q.length);
-    } catch {
-      setQueuedCount(0);
-    }
+    const q = loadOfflineQueue();
+    setQueuedCount(q.length);
   };
 
-  // Synchronize offline queued actions
+  // Synchronize offline queued actions with drop-on-409 and clientActionIds
   const syncOfflineQueue = React.useCallback(async () => {
     try {
-      const queueRaw = localStorage.getItem('eldercare_offline_queue');
-      if (!queueRaw) return;
-      const queue: QueuedAction[] = JSON.parse(queueRaw);
+      const queue = loadOfflineQueue();
       if (!Array.isArray(queue) || queue.length === 0) return;
 
       setStatusMessage(`Syncing ${queue.length} offline actions...`);
 
-      const remaining: QueuedAction[] = [];
-      for (const item of queue) {
-        try {
-          const res = await fetch(`/api/profiles/${item.profileId}/doses/${item.doseId}/action`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: item.action,
-              skipReason: item.skipReason,
-            }),
-          });
-          if (!res.ok) {
-            remaining.push(item);
-          }
-        } catch {
-          remaining.push(item);
-        }
-      }
+      const result = await syncOfflineQueueItems(queue);
 
-      if (remaining.length === 0) {
-        localStorage.removeItem('eldercare_offline_queue');
-        setQueuedCount(0);
+      saveOfflineQueue(result.remainingQueue);
+      setQueuedCount(result.remainingQueue.length);
+
+      if (result.remainingQueue.length === 0) {
         setStatusMessage('All offline medication actions synchronized successfully.');
       } else {
-        localStorage.setItem('eldercare_offline_queue', JSON.stringify(remaining));
-        setQueuedCount(remaining.length);
+        setStatusMessage(`Synced ${result.successful} actions. ${result.remainingQueue.length} remaining.`);
       }
     } catch {
       // ignore parse errors
@@ -259,19 +247,24 @@ export default function SeniorModePage() {
     loadData();
   }, [loadData]);
 
-  // Queue offline action
+  // Queue offline action with clientActionId
   const queueOfflineAction = (doseId: string, action: 'TAKE' | 'SNOOZE' | 'SKIP', reason?: string) => {
     if (!profileId) return;
     try {
-      const q: QueuedAction[] = JSON.parse(localStorage.getItem('eldercare_offline_queue') || '[]');
+      const q = loadOfflineQueue();
+      const clientActionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `client_act_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
       q.push({
+        clientActionId,
         profileId,
         doseId,
         action,
         skipReason: reason,
-        queuedAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
       });
-      localStorage.setItem('eldercare_offline_queue', JSON.stringify(q));
+      saveOfflineQueue(q);
       setQueuedCount(q.length);
     } catch {
       // ignore
@@ -541,6 +534,9 @@ export default function SeniorModePage() {
           >
             {highContrast ? 'Black & White' : 'High Contrast'}
           </button>
+
+          {/* Language Selector */}
+          <LanguageSelector />
 
           {/* Passcode Protected Exit */}
           <button

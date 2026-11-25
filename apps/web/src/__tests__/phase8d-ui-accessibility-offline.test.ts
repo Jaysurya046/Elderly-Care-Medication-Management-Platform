@@ -22,15 +22,20 @@ vi.mock('@elder-care/db', () => {
   return { prisma: mockPrisma };
 });
 
-// Mock Auth
-vi.mock('../services/auth-service', () => ({
-  verifySessionToken: vi.fn(),
+// Mock Session & Audit
+vi.mock('../lib/session', () => ({
+  getCurrentUser: vi.fn(),
+}));
+
+vi.mock('../lib/audit', () => ({
+  recordAuditLog: vi.fn().mockResolvedValue(undefined),
+  extractClientDetails: vi.fn().mockReturnValue({ ip: '192.168.1.1', userAgent: 'Mozilla/5.0' }),
 }));
 
 import { prisma } from '@elder-care/db';
-import { verifySessionToken } from '../services/auth-service';
+import { getCurrentUser } from '../lib/session';
 
-// Import Route under test (will fail before route is created)
+// Import Route under test
 import { GET as getAuditLogs } from '../app/api/profiles/[id]/audit-logs/route';
 import { syncOfflineQueueItems, QueuedOfflineAction } from '../lib/offline-queue';
 import { calculateAdherence, calculateStreak, generateDeterministicInsights } from '@elder-care/core';
@@ -43,7 +48,7 @@ describe('Phase 8d-2: UI Modernization, Accessibility, Audit Logs & Offline Queu
 
   describe('1. Real Audit Log API Endpoint (GET /api/profiles/[id]/audit-logs)', () => {
     it('rejects unauthenticated request with 401', async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue(null);
+      vi.mocked(getCurrentUser).mockResolvedValue(null);
 
       const req = new NextRequest('http://localhost:3000/api/profiles/prof-1/audit-logs');
       const res = await getAuditLogs(req, { params: Promise.resolve({ id: 'prof-1' }) });
@@ -52,15 +57,18 @@ describe('Phase 8d-2: UI Modernization, Accessibility, Audit Logs & Offline Queu
     });
 
     it('returns sanitized audit logs for authorized OWNER/CAREGIVER', async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        id: 'sess-1',
-        userId: 'user-1',
-        tokenHash: 'h',
-        expiresAt: new Date(Date.now() + 3600000),
-        user: { id: 'user-1', email: 'owner@example.com', name: 'Elder Owner' },
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: 'user-1',
+        email: 'owner@example.com',
+        name: 'Elder Owner',
       } as any);
 
-      vi.mocked(prisma.membership.findFirst).mockResolvedValue({
+      vi.mocked(prisma.careProfile.findUnique).mockResolvedValue({
+        id: 'prof-1',
+        displayName: 'Elder Profile',
+      } as any);
+
+      vi.mocked(prisma.membership.findUnique).mockResolvedValue({
         id: 'mem-1',
         userId: 'user-1',
         profileId: 'prof-1',
@@ -249,7 +257,7 @@ describe('Phase 8d-2: UI Modernization, Accessibility, Audit Logs & Offline Queu
     });
 
     it('falls back to English when a key is undefined in other languages', () => {
-      expect(getTranslation('es' as SupportedLanguage, 'common.appName')).toBe('Elder Care Platform');
+      expect(getTranslation('es' as SupportedLanguage, 'common.systemStatus')).toBe('System Operational');
     });
   });
 });

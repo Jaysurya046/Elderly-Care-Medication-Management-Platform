@@ -2,47 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Root font-size scaling for text size accessibility (Section 7) */
+html,
+html[data-text-size="normal"] {
+  font-size: 16px;
+}
+
+html[data-text-size="large"],
+html.text-large {
+  font-size: 18px;
+}
+
+html[data-text-size="xlarge"],
+html.text-xlarge {
+  font-size: 20px;
+}
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
   --border: #e2e8f0;
-  --primary: #2563eb;
+  --primary: #1d4ed8;
   --primary-foreground: #ffffff;
   --focus-ring: #2563eb;
   --senior-font-scale: 1rem;
 }
 
-/* High Contrast Mode (7:1 contrast compliance) */
+/* High Contrast Mode (WCAG AAA >= 7:1 contrast compliance) */
+.high-contrast,
+[data-high-contrast="true"],
 body.high-contrast {
-  --background: #ffffff;
-  --foreground: #000000;
-  --card: #ffffff;
-  --card-foreground: #000000;
-  --border: #000000;
-  --primary: #0000ee;
-  --primary-foreground: #ffffff;
-  --focus-ring: #000000;
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #000000;
+  --card-foreground: #ffffff;
+  --border: #ffffff;
+  --primary: #ffff00;
+  --primary-foreground: #000000;
+  --focus-ring: #ffffff;
 }
 
 body.high-contrast * {
-  border-color: #000000 !important;
+  border-color: var(--border) !important;
 }
 
 body.high-contrast button {
   border-width: 2px !important;
-}
-
-/* Senior Mode font-scaling */
-body.text-large {
-  font-size: 22px !important;
-  line-height: 32px !important;
-}
-
-body.text-xlarge {
-  font-size: 26px !important;
-  line-height: 38px !important;
 }
 
 /* Focus styles for keyboard accessibility */
@@ -51,13 +58,17 @@ body.text-xlarge {
   outline-offset: 3px !important;
 }
 
-/* Minimum 48px touch targets with 8px spacing */
+/* Scoped minimum 48px touch targets for interactive controls */
 button,
-a,
-input,
 select,
-textarea {
+textarea,
+input:not([type="checkbox"]):not([type="radio"]),
+[role="button"],
+.touch-target,
+nav a,
+.btn {
   min-height: 48px;
+  min-width: 48px;
   touch-action: manipulation;
 }
 

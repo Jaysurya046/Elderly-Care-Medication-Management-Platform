@@ -256,3 +256,16 @@ This document records architectural, technical, and domain decisions made throug
      - `processDoseReminders` sends `DoseDueNowEmail` (`DOSE_DUE_NOW`) at scheduled time if dose remains PENDING.
      - `processAppointmentReminders` triggers travel-aware leave-by alerts (`APPOINTMENT_LEAVE_BY`) at `startsAt - travelMinutes`.
 - **Rationale**: Mandated by Goal.md Section 6.2, 6.3, 7.2, and Phase 8d specifications.
+
+### DEC-027: UI Modernization, Accessibility (WCAG AAA), Radix Dialogs, Adherence Analytics, Real Audit Log API & Offline Queue (Phase 8d-2)
+- **Date**: 2026-11-26
+- **Status**: Accepted
+- **Context**: Upgrading the web interface to meet elderly accessibility requirements (root font scaling, high contrast CSS variables, scoped 48px touch targets, accessible modal replacements), providing comprehensive adherence insights (7-day, 30-day, streaks, missed dose patterns), delivering a dedicated security audit log endpoint, full internationalization (EN, ES, HI), and resilient offline queue synchronization.
+- **Decision**:
+  1. Accessibility & Typography: Set root `<html>` font-size dynamically for text size scaling (`normal: 16px`, `large: 18px`, `xlarge: 20px`). Replaced static Tailwind color definitions with CSS custom properties (`var(--background)`, `var(--foreground)`, `var(--primary)`, etc.) ensuring WCAG AAA (>= 7:1) contrast ratio in high-contrast mode. Scoped the 48px touch-target rule to interactive elements (`button, select, textarea, input:not([type="checkbox"]):not([type="radio"]), [role="button"], .touch-target, nav a, .btn`), preserving natural inline text link formatting.
+  2. Accessible Radix Dialogs: Created `@/components/ui/dialog.tsx` utilizing `@radix-ui/react-dialog` with `ConfirmDialog`. Replaced all browser `window.confirm` calls across the application (emergency code rotation, care circle member removal) with accessible dialogs featuring focus trapping, screen-reader labels, and keyboard escape handling.
+  3. Adherence Analytics & Insights: Displayed 7-day adherence %, 30-day adherence %, consecutive clean streak count (via `calculateStreak`), and deterministic missed-dose pattern insights (via `generateDeterministicInsights`) in the Care Circle Overview dashboard.
+  4. Real Audit Log Endpoint & AST Guard: Implemented `GET /api/profiles/[id]/audit-logs` guarded by direct invocation of `requireProfileAccess`, restricted to OWNER/CAREGIVER roles, returning sanitized security logs and recording `AUDIT_LOG:VIEW`.
+  5. Multi-Language Support (i18n): Implemented `LanguageProvider`, `LanguageSelector`, and `useTranslation` hook in `@/lib/i18n.tsx` supporting English, Spanish (`es`), and Hindi (`hi`) with automatic English fallback.
+  6. Service Worker & Offline Sync: Added service worker (`apps/web/public/sw.js`) and offline queue manager (`@/lib/offline-queue.ts`) generating client action IDs (`clientActionId`) and gracefully dropping actions on HTTP 409 Conflict.
+- **Rationale**: Mandated by Goal.md Section 8, 9, and Phase 8d UI/accessibility specifications.

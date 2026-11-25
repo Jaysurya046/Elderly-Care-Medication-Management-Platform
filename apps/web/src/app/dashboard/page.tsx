@@ -24,7 +24,15 @@ import {
   X,
 } from 'lucide-react';
 import { Badge, Button } from '@elder-care/ui';
-import { calculateAdherence, isLowStock, calculateDaysOfSupply } from '@elder-care/core';
+import {
+  calculateAdherence,
+  calculateStreak,
+  generateDeterministicInsights,
+  isLowStock,
+  calculateDaysOfSupply,
+} from '@elder-care/core';
+import { ConfirmDialog } from '@/components/ui/dialog';
+import { useTranslation, LanguageSelector } from '@/lib/i18n';
 
 export default function CareCircleDashboardPage() {
   const router = useRouter();
@@ -63,6 +71,12 @@ export default function CareCircleDashboardPage() {
   const [elderConfirmMemberModal, setElderConfirmMemberModal] = React.useState<any | null>(null);
   const [elderConfirmScopes, setElderConfirmScopes] = React.useState<Record<string, boolean>>({});
   const [transferOwnershipTarget, setTransferOwnershipTarget] = React.useState<any | null>(null);
+  const [rotateConfirmOpen, setRotateConfirmOpen] = React.useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = React.useState<string | null>(null);
+
+  // Real Audit Logs State
+  const [auditLogs, setAuditLogs] = React.useState<any[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = React.useState(false);
 
   // Form Submitting & Field Errors
   const [formSubmitting, setFormSubmitting] = React.useState(false);
@@ -219,20 +233,81 @@ export default function CareCircleDashboardPage() {
     }
   }, [profileId, loadCollections]);
 
-  // Calculate Real Adherence
-  const adherence = React.useMemo(() => {
-    if (!doses || doses.length === 0) {
-      return { percentage: 100, takenCount: 0, lateTakenCount: 0, missedCount: 0, totalEligibleDoses: 0 };
-    }
+  // Calculate Real Adherence (7-day, 30-day, streaks, and patterns)
+  const now = React.useMemo(() => new Date(), []);
+  const sevenDaysAgo = React.useMemo(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), []);
+  const thirtyDaysAgo = React.useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), []);
+
+  const doses7d = React.useMemo(() => {
+    return (doses || []).filter((d) => new Date(d.scheduledAt) >= sevenDaysAgo);
+  }, [doses, sevenDaysAgo]);
+
+  const doses30d = React.useMemo(() => {
+    return (doses || []).filter((d) => new Date(d.scheduledAt) >= thirtyDaysAgo);
+  }, [doses, thirtyDaysAgo]);
+
+  const adherence7d = React.useMemo(() => {
     return calculateAdherence(
-      doses.map((d) => ({
+      doses7d.map((d) => ({
         id: d.id,
         scheduledAt: d.scheduledAt,
         status: d.status,
         skipReason: d.skipReason,
-      }))
+      })),
+      now
     );
+  }, [doses7d, now]);
+
+  const adherence30d = React.useMemo(() => {
+    return calculateAdherence(
+      doses30d.map((d) => ({
+        id: d.id,
+        scheduledAt: d.scheduledAt,
+        status: d.status,
+        skipReason: d.skipReason,
+      })),
+      now
+    );
+  }, [doses30d, now]);
+
+  const streak = React.useMemo(() => {
+    const daysMap = new Map<string, any[]>();
+    for (const d of doses || []) {
+      const dateStr = new Date(d.scheduledAt).toISOString().slice(0, 10);
+      const list = daysMap.get(dateStr) || [];
+      list.push(d);
+      daysMap.set(dateStr, list);
+    }
+    const daysArr = Array.from(daysMap.entries()).map(([dateStr, dList]) => ({ dateStr, doses: dList }));
+    return calculateStreak(daysArr, now.toISOString().slice(0, 10));
+  }, [doses, now]);
+
+  const missedPatterns = React.useMemo(() => {
+    return generateDeterministicInsights(doses || []);
   }, [doses]);
+
+  // Load Real Audit Logs
+  const loadAuditLogs = React.useCallback(async () => {
+    if (!profileId) return;
+    try {
+      setLoadingAuditLogs(true);
+      const res = await fetch(`/api/profiles/${profileId}/audit-logs`);
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(data.data || []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingAuditLogs(false);
+    }
+  }, [profileId]);
+
+  React.useEffect(() => {
+    if (activeTab === 'audit' && profileId) {
+      loadAuditLogs();
+    }
+  }, [activeTab, profileId, loadAuditLogs]);
 
   // Low Stock Medications
   const lowStockMeds = React.useMemo(() => {
@@ -496,17 +571,9 @@ export default function CareCircleDashboardPage() {
     }
   };
 
-  // Handle Rotate Emergency Code
-  const handleRotateEmergencyCode = async () => {
+  // Handle Rotate Emergency Code (Radix Confirm Dialog)
+  const executeRotateEmergencyCode = async () => {
     if (!profileId) return;
-    if (
-      !confirm(
-        'Are you sure you want to rotate the emergency code? Any previously printed emergency cards will immediately stop working.'
-      )
-    ) {
-      return;
-    }
-
     try {
       const res = await fetch(`/api/profiles/${profileId}/emergency-code`, {
         method: 'POST',
@@ -521,6 +588,10 @@ export default function CareCircleDashboardPage() {
     } catch {
       setErrorMessage('Network error rotating emergency code.');
     }
+  };
+
+  const handleRotateEmergencyCode = () => {
+    setRotateConfirmOpen(true);
   };
 
   // Handle Save Scopes
@@ -567,13 +638,11 @@ export default function CareCircleDashboardPage() {
     }
   };
 
-  // Handle Remove Member
-  const handleRemoveMember = async (memberId: string) => {
-    if (!profileId) return;
-    if (!confirm('Are you sure you want to remove this member from the Care Circle?')) return;
-
+  // Handle Remove Member (Radix Confirm Dialog)
+  const executeRemoveMember = async () => {
+    if (!profileId || !removeMemberTarget) return;
     try {
-      const res = await fetch(`/api/profiles/${profileId}/care-circle/${memberId}`, {
+      const res = await fetch(`/api/profiles/${profileId}/care-circle/${removeMemberTarget}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -582,7 +651,13 @@ export default function CareCircleDashboardPage() {
       }
     } catch {
       // ignore
+    } finally {
+      setRemoveMemberTarget(null);
     }
+  };
+
+  const handleRemoveMember = (memberId: string) => {
+    setRemoveMemberTarget(memberId);
   };
 
   // Handle Cancel Scheduled Deletion
@@ -756,6 +831,7 @@ export default function CareCircleDashboardPage() {
               Emergency Code Protected (OWNER only)
             </span>
           )}
+          <LanguageSelector />
           <div className="flex items-center gap-2">
             <a
               href={`/api/profiles/${profileId}/export?format=json`}
@@ -810,28 +886,41 @@ export default function CareCircleDashboardPage() {
       {activeTab === 'overview' && (
         <div className="space-y-8">
           {/* Key Metrics Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <span className="text-slate-500 font-semibold text-sm">Overall Adherence Rate</span>
+              <span className="text-slate-500 font-semibold text-sm">7-Day Adherence</span>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className={`text-4xl font-extrabold ${adherence.percentage >= 85 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  {adherence.percentage}%
+                <span className={`text-4xl font-extrabold ${adherence7d.percentage >= 85 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {adherence7d.percentage}%
                 </span>
                 <span className="text-slate-500 text-sm">Target: &gt;90%</span>
               </div>
               <p className="text-slate-600 text-xs mt-3">
-                {adherence.takenCount + adherence.lateTakenCount} of {adherence.totalEligibleDoses} eligible doses recorded
+                {adherence7d.takenCount + adherence7d.lateTakenCount} of {adherence7d.totalEligibleDoses} eligible doses recorded
               </p>
             </div>
 
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <span className="text-slate-500 font-semibold text-sm">Missed / Skipped Doses</span>
+              <span className="text-slate-500 font-semibold text-sm">30-Day Adherence</span>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-4xl font-extrabold text-blue-600">{adherence.missedCount}</span>
-                <span className="text-slate-500 text-sm">Missed</span>
+                <span className={`text-4xl font-extrabold ${adherence30d.percentage >= 85 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {adherence30d.percentage}%
+                </span>
+                <span className="text-slate-500 text-sm">Target: &gt;90%</span>
               </div>
               <p className="text-slate-600 text-xs mt-3">
-                Formula: (Taken + Late) / Eligible Scheduled
+                {adherence30d.takenCount + adherence30d.lateTakenCount} of {adherence30d.totalEligibleDoses} eligible doses recorded
+              </p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <span className="text-slate-500 font-semibold text-sm">Adherence Streak</span>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-4xl font-extrabold text-blue-600">{streak}</span>
+                <span className="text-slate-500 text-sm">Consecutive Days</span>
+              </div>
+              <p className="text-slate-600 text-xs mt-3">
+                Full adherence across scheduled medications
               </p>
             </div>
 
@@ -852,6 +941,26 @@ export default function CareCircleDashboardPage() {
               </div>
               <p className="text-slate-600 text-xs mt-3">{medications.length} active prescriptions tracked</p>
             </div>
+          </div>
+
+          {/* Missed Dose Patterns & Insights Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h3 className="text-xl font-bold text-slate-900 mb-3">Missed-Dose Pattern Analysis</h3>
+            {missedPatterns.length > 0 ? (
+              <div className="space-y-2">
+                {missedPatterns.map((pattern, idx) => (
+                  <div key={idx} className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-sm font-medium">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span>{pattern}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-sm font-medium">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>No adverse missed-dose patterns detected. Routine adherence is consistent.</span>
+              </div>
+            )}
           </div>
 
           {/* Activity Timeline */}
@@ -1154,11 +1263,21 @@ export default function CareCircleDashboardPage() {
       {/* Tab 6: Audit Trail */}
       {activeTab === 'audit' && (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">Security & Audit Log</h2>
-            <p className="text-slate-500 text-sm">
-              Immutable, append-only record of every health data action and security event.
-            </p>
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Security & Audit Log</h2>
+              <p className="text-slate-500 text-sm">
+                Immutable, append-only record of every health data action and security event.
+              </p>
+            </div>
+            <button
+              onClick={loadAuditLogs}
+              disabled={loadingAuditLogs}
+              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingAuditLogs ? 'animate-spin' : ''}`} />
+              Refresh Logs
+            </button>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto shadow-sm">
@@ -1169,21 +1288,31 @@ export default function CareCircleDashboardPage() {
                   <th className="py-3 px-4 font-bold">Action</th>
                   <th className="py-3 px-4 font-bold">Entity</th>
                   <th className="py-3 px-4 font-bold">Actor</th>
-                  <th className="py-3 px-4 font-bold">IP</th>
+                  <th className="py-3 px-4 font-bold">IP (HMAC)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-600">
-                {activities.map((log, i) => (
-                  <tr key={i} className="hover:bg-slate-50">
-                    <td className="py-3 px-4 font-mono text-xs">
-                      {new Date(log.timestamp || log.createdAt).toLocaleString()}
+                {auditLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-500 italic">
+                      {loadingAuditLogs ? 'Loading audit records...' : 'No audit events recorded yet.'}
                     </td>
-                    <td className="py-3 px-4 font-semibold text-slate-800">{log.action}</td>
-                    <td className="py-3 px-4">{log.entityType || log.entityId || 'Record'}</td>
-                    <td className="py-3 px-4">{log.actorName || log.actorUserId || 'User'}</td>
-                    <td className="py-3 px-4 font-mono text-xs">{log.ip || '127.0.0.1'}</td>
                   </tr>
-                ))}
+                ) : (
+                  auditLogs.map((log: any, i: number) => (
+                    <tr key={log.id || i} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-mono text-xs">
+                        {new Date(log.createdAt || log.timestamp).toLocaleString()}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-slate-800">{log.action}</td>
+                      <td className="py-3 px-4">{log.entityType || log.entityId || 'Record'}</td>
+                      <td className="py-3 px-4">
+                        {log.actorRole ? `${log.actorRole} (${log.actorUserId || 'User'})` : (log.actorName || log.actorUserId || 'User')}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-xs">{log.ipHMAC || log.ip || '127.0.0.1'}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1832,6 +1961,28 @@ export default function CareCircleDashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Accessible Radix Confirm Dialog for Emergency Code Rotation */}
+      <ConfirmDialog
+        open={rotateConfirmOpen}
+        onOpenChange={setRotateConfirmOpen}
+        title="Rotate Emergency Access Code"
+        description="Are you sure you want to rotate the emergency access code? The existing emergency QR code and numeric access code will immediately become invalid."
+        confirmLabel="Rotate Code"
+        onConfirm={executeRotateEmergencyCode}
+        variant="warning"
+      />
+
+      {/* Accessible Radix Confirm Dialog for Member Removal */}
+      <ConfirmDialog
+        open={!!removeMemberTarget}
+        onOpenChange={(open) => !open && setRemoveMemberTarget(null)}
+        title="Remove Care Circle Member"
+        description="Are you sure you want to remove this member from the Care Circle? They will immediately lose access to medications, health records, and emergency alerts."
+        confirmLabel="Remove Member"
+        onConfirm={executeRemoveMember}
+        variant="danger"
+      />
     </div>
   );
 }

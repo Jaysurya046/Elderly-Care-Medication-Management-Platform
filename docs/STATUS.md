@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 8d-1 (Worker, Timezone, and Email Alerts) Completed and Verified*
+*Last updated: Phase 8d-2 (UI Modernization, Accessibility & Offline) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,7 +13,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **32 test files, 205 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm test` | ✅ PASS | **33 test files, 214 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
 | `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
 | `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
@@ -220,6 +220,22 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **5. Missed-Dose Email to Elder** | ✅ Complete | In `apps/worker/src/jobs/auto-miss.job.ts`, when a dose transitions to `MISSED` after grace expiration, sends `MissedDoseEmail` (`DOSE_MISSED`) to the elder's user email, respecting `emailShowsMedicineNames` privacy settings. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
 | **6. Dose-Due-Now Email** | ✅ Complete | In `apps/worker/src/jobs/dose-reminders.job.ts`, when reference time reaches `scheduledAt` and dose remains `PENDING`, dispatches `DoseDueNowEmail` with `DOSE_DUE_NOW` notification type and reference key. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
 | **7. Travel-Aware Appointment Leave-By Alert** | ✅ Complete | In `apps/worker/src/jobs/appointment-reminders.job.ts`, calculates `leaveByTime = startsAt - travelMinutes`. Dispatches `APPOINTMENT_LEAVE_BY` alert to eligible members when reference time reaches `leaveByTime`, including estimated travel time and respecting privacy visibility. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
+
+---
+
+## 15. Phase 8d-2: UI Modernization, Accessibility & Offline Summary
+
+| Phase 8d-2 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Root Font-Size Scaling for Text Size** | ✅ Complete | Updated `apps/web/src/app/globals.css` with root font-size scaling based on `data-text-size` attribute (`normal: 16px`, `large: 18px`, `xlarge: 20px`), allowing all `rem`-based typography across the app to scale uniformly for seniors. |
+| **2. High-Contrast WCAG AAA Colors via CSS Variables** | ✅ Complete | Driven Tailwind colors via CSS variables (`var(--background)`, `var(--foreground)`, `var(--primary)`, etc.) in `apps/web/tailwind.config.ts` and `apps/web/src/app/globals.css`. High-contrast mode enforces black-and-white borders and >= 7:1 contrast ratios. |
+| **3. Scoped 48px Touch Target Rule** | ✅ Complete | Scoped the 48px minimum height rule specifically to interactive controls (`button, select, textarea, input:not([type="checkbox"]):not([type="radio"]), [role="button"], .touch-target, nav a, .btn`), preserving natural inline text link formatting. |
+| **4. Accessible Radix Dialog Replacement** | ✅ Complete | Created `@/components/ui/dialog.tsx` wrapping `@radix-ui/react-dialog` with `ConfirmDialog`. Replaced all browser `window.confirm` calls (emergency code rotation, care circle member removal) with accessible modal dialogs with focus trapping and keyboard dismiss. |
+| **5. Adherence Analytics & Missed Dose Patterns** | ✅ Complete | Displayed 7-day adherence %, 30-day adherence %, consecutive clean streak count (via `calculateStreak`), and deterministic missed-dose pattern insights (via `generateDeterministicInsights`) in the Care Circle Overview dashboard (`apps/web/src/app/dashboard/page.tsx`). Verified by `apps/web/src/__tests__/phase8d-ui-accessibility-offline.test.ts`. |
+| **6. i18n Multi-Language Wiring** | ✅ Complete | Created `@/lib/i18n.tsx` with `LanguageProvider`, `LanguageSelector`, and `useTranslation` hook supporting English, Spanish (`es`), and Hindi (`hi`) with automatic English fallback. Integrated `<LanguageSelector />` into dashboard and senior headers. Verified by `apps/web/src/__tests__/phase8d-ui-accessibility-offline.test.ts`. |
+| **7. Real Audit-Log API Endpoint** | ✅ Complete | Implemented `GET /api/profiles/[id]/audit-logs` guarded by direct invocation of `requireProfileAccess` for AST route-guard compliance, restricted to OWNER/CAREGIVER, returning sanitized audit records and writing `AUDIT_LOG:VIEW` audit events. Verified by `apps/web/src/__tests__/phase8d-ui-accessibility-offline.test.ts` and `security-route-guard.test.ts`. |
+| **8. Service Worker & Idempotent Offline Queue** | ✅ Complete | Created `apps/web/public/sw.js` and `@/lib/offline-queue.ts` generating unique `clientActionId` headers and dropping queued actions on HTTP 409 Conflict. Verified by `apps/web/src/__tests__/phase8d-ui-accessibility-offline.test.ts`. |
+
 
 
 

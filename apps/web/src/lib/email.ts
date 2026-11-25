@@ -33,14 +33,18 @@ function getEmailClient() {
 export interface SendEmailOptions {
   to: string;
   subject: string;
-  template: React.ReactElement;
+  template?: React.ReactElement;
+  html?: string;
+  text?: string;
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; error?: string }> {
   try {
     const from = process.env.EMAIL_FROM || 'Elder Care <notifications@eldercare.local>';
-    const html = await render(options.template);
-    const text = await render(options.template, { plainText: true });
+    const html = options.template ? await render(options.template) : options.html || '';
+    const text = options.template
+      ? await render(options.template, { plainText: true })
+      : options.text || options.html || '';
 
     const emailEngine = getEmailClient();
 

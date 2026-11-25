@@ -68,9 +68,10 @@ export default function SeniorModePage() {
   const [isOffline, setIsOffline] = React.useState(false);
   const [queuedCount, setQueuedCount] = React.useState(0);
 
-  // Detect time block from Date
-  const getTimeBlock = (date: Date): 'MORNING' | 'AFTERNOON' | 'EVENING' | 'BEDTIME' => {
-    const hours = date.getHours();
+  // Detect time block from Date in profile timezone
+  const getTimeBlock = (date: Date, timeZone: string = 'Asia/Kolkata'): 'MORNING' | 'AFTERNOON' | 'EVENING' | 'BEDTIME' => {
+    const hourStr = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone }).format(date);
+    const hours = parseInt(hourStr, 10);
     if (hours >= 5 && hours < 12) return 'MORNING';
     if (hours >= 12 && hours < 17) return 'AFTERNOON';
     if (hours >= 17 && hours < 21) return 'EVENING';
@@ -196,14 +197,21 @@ export default function SeniorModePage() {
       }
 
       const activeProfileId = activeProfile.id;
+      const profileTimezone = activeProfile.timezone || 'Asia/Kolkata';
       setProfileId(activeProfileId);
       setMembershipId(firstMembership.id);
       setElderName(activeProfile.displayName || activeProfile.elderName || 'Senior');
 
-      // 2. Fetch real doses for today
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+      // 2. Fetch real doses for today in profile timezone
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: profileTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const todayDateStr = formatter.format(new Date()); // YYYY-MM-DD
+      const startOfDay = new Date(`${todayDateStr}T00:00:00.000Z`).toISOString();
+      const endOfDay = new Date(`${todayDateStr}T23:59:59.999Z`).toISOString();
 
       const dosesRes = await fetch(
         `/api/profiles/${activeProfileId}/doses?startDate=${encodeURIComponent(startOfDay)}&endDate=${encodeURIComponent(endOfDay)}`
@@ -213,13 +221,18 @@ export default function SeniorModePage() {
         const dosesData = await dosesRes.json();
         const mappedDoses: DoseItem[] = (dosesData.data || []).map((d: any) => {
           const sched = new Date(d.scheduledAt);
+          const med = d.schedule?.medication || d.medication;
           return {
             id: d.id,
-            name: d.medication?.name || 'Medication',
-            strength: d.medication?.strength || '',
-            instructions: d.medication?.instructions || 'Take as prescribed',
-            timeStr: sched.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            block: getTimeBlock(sched),
+            name: med?.name || 'Medication',
+            strength: med?.strength || '',
+            instructions: med?.instructions || 'Take as prescribed',
+            timeStr: new Intl.DateTimeFormat('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: profileTimezone,
+            }).format(sched),
+            block: getTimeBlock(sched, profileTimezone),
             status: d.status,
           };
         });
@@ -287,14 +300,19 @@ export default function SeniorModePage() {
       });
 
       const data = await res.json();
+      if (res.status === 409) {
+        const actorName = data.actorName || data.actor || data.message || 'another caregiver';
+        setErrorMessage(`Already recorded by ${actorName}.`);
+        await loadData();
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to record dose.');
       }
 
-      setDoses((prev) =>
-        prev.map((d) => (d.id === doseId ? { ...d, status: 'TAKEN', isNextDue: false } : d))
-      );
       setStatusMessage('Good job! Medicine marked as taken.');
+      await loadData();
     } catch (err: any) {
       setErrorMessage(err.message || 'Could not record dose.');
     } finally {
@@ -324,14 +342,19 @@ export default function SeniorModePage() {
       });
 
       const data = await res.json();
+      if (res.status === 409) {
+        const actorName = data.actorName || data.actor || data.message || 'another caregiver';
+        setErrorMessage(`Already recorded by ${actorName}.`);
+        await loadData();
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to snooze dose.');
       }
 
-      setDoses((prev) =>
-        prev.map((d) => (d.id === doseId ? { ...d, status: 'SNOOZED', isNextDue: false } : d))
-      );
       setStatusMessage('Reminder set. We will remind you again in 15 minutes.');
+      await loadData();
     } catch (err: any) {
       setErrorMessage(err.message || 'Could not snooze dose.');
     } finally {
@@ -367,18 +390,23 @@ export default function SeniorModePage() {
       });
 
       const data = await res.json();
+      if (res.status === 409) {
+        const actorName = data.actorName || data.actor || data.message || 'another caregiver';
+        setErrorMessage(`Already recorded by ${actorName}.`);
+        setSkipModalDoseId(null);
+        setSkipReason('');
+        await loadData();
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to record skip.');
       }
 
-      setDoses((prev) =>
-        prev.map((d) =>
-          d.id === skipModalDoseId ? { ...d, status: 'SKIPPED', isNextDue: false } : d
-        )
-      );
       setStatusMessage('Medicine marked as skipped. Caregiver has been notified.');
       setSkipModalDoseId(null);
       setSkipReason('');
+      await loadData();
     } catch (err: any) {
       setErrorMessage(err.message || 'Could not skip dose.');
     } finally {

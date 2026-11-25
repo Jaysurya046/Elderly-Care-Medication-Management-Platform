@@ -36,6 +36,7 @@ export default function CareCircleDashboardPage() {
   // Active Profile & Session State
   const [profile, setProfile] = React.useState<any>(null);
   const [profileId, setProfileId] = React.useState<string | null>(null);
+  const [allMemberships, setAllMemberships] = React.useState<any[]>([]);
   const [userRole, setUserRole] = React.useState<string>('CAREGIVER');
   const [userScopes, setUserScopes] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -57,6 +58,11 @@ export default function CareCircleDashboardPage() {
   const [addApptModalOpen, setAddApptModalOpen] = React.useState(false);
   const [addNoteModalOpen, setAddNoteModalOpen] = React.useState(false);
   const [inviteModalOpen, setInviteModalOpen] = React.useState(false);
+  const [scopeModalMember, setScopeModalMember] = React.useState<any | null>(null);
+  const [editScopes, setEditScopes] = React.useState<Record<string, boolean>>({});
+  const [elderConfirmMemberModal, setElderConfirmMemberModal] = React.useState<any | null>(null);
+  const [elderConfirmScopes, setElderConfirmScopes] = React.useState<Record<string, boolean>>({});
+  const [transferOwnershipTarget, setTransferOwnershipTarget] = React.useState<any | null>(null);
 
   // Form Submitting & Field Errors
   const [formSubmitting, setFormSubmitting] = React.useState(false);
@@ -107,7 +113,7 @@ export default function CareCircleDashboardPage() {
   });
 
   // Initial Fetch: Profile & Session
-  const loadProfile = React.useCallback(async () => {
+  const loadProfile = React.useCallback(async (targetIdOverride?: string) => {
     try {
       setLoading(true);
       const meRes = await fetch('/api/auth/me');
@@ -120,9 +126,20 @@ export default function CareCircleDashboardPage() {
       }
 
       const meData = await meRes.json();
-      const firstMembership = meData.memberships?.[0];
-      const activeProfile = firstMembership?.profile || firstMembership?.careProfile;
-      if (!firstMembership || !activeProfile) {
+      const memberships = meData.memberships || [];
+      setAllMemberships(memberships);
+
+      const savedProfileId =
+        targetIdOverride || (typeof window !== 'undefined' ? localStorage.getItem('eldercare_active_profile') : null);
+
+      const targetMembership =
+        memberships.find((m: any) => {
+          const p = m.profile || m.careProfile;
+          return p?.id === savedProfileId;
+        }) || memberships[0];
+
+      const activeProfile = targetMembership?.profile || targetMembership?.careProfile;
+      if (!targetMembership || !activeProfile) {
         setErrorMessage('No active care profile found.');
         setLoading(false);
         return;
@@ -146,6 +163,15 @@ export default function CareCircleDashboardPage() {
       setLoading(false);
     }
   }, [router]);
+
+  const handleSwitchProfile = async (newProfileId: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('eldercare_active_profile', newProfileId);
+    }
+    setProfileId(newProfileId);
+    await loadProfile(newProfileId);
+    await loadCollections(newProfileId);
+  };
 
   // Load Tab Specific Collections
   const loadCollections = React.useCallback(async (pId: string) => {
@@ -451,21 +477,93 @@ export default function CareCircleDashboardPage() {
     }
   };
 
-  // Handle Confirm Member
-  const handleConfirmMember = async (memberId: string) => {
+  // Handle Confirm Member (with optional custom scopes)
+  const handleConfirmMember = async (memberId: string, confirmedScopes?: Record<string, boolean>) => {
     if (!profileId) return;
     try {
       const res = await fetch(`/api/profiles/${profileId}/care-circle/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ membershipId: memberId }),
+        body: JSON.stringify({ membershipId: memberId, confirmedScopes }),
       });
       if (res.ok) {
         setStatusMessage('Member successfully confirmed.');
+        setElderConfirmMemberModal(null);
         loadProfile();
       }
     } catch {
       // ignore
+    }
+  };
+
+  // Handle Rotate Emergency Code
+  const handleRotateEmergencyCode = async () => {
+    if (!profileId) return;
+    if (
+      !confirm(
+        'Are you sure you want to rotate the emergency code? Any previously printed emergency cards will immediately stop working.'
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/profiles/${profileId}/emergency-code`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setProfile((prev: any) => ({ ...prev, emergencyCode: data.emergencyCode }));
+        setStatusMessage(`Emergency code rotated successfully to: ${data.emergencyCode}`);
+      } else {
+        setErrorMessage(data.error || 'Failed to rotate emergency code.');
+      }
+    } catch {
+      setErrorMessage('Network error rotating emergency code.');
+    }
+  };
+
+  // Handle Save Scopes
+  const handleSaveScopes = async () => {
+    if (!profileId || !scopeModalMember) return;
+    try {
+      const res = await fetch(`/api/profiles/${profileId}/care-circle/${scopeModalMember.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopes: editScopes }),
+      });
+      if (res.ok) {
+        setStatusMessage('Member scopes updated successfully.');
+        setScopeModalMember(null);
+        loadProfile();
+      } else {
+        const data = await res.json();
+        setErrorMessage(data.error || 'Failed to update member scopes.');
+      }
+    } catch {
+      setErrorMessage('Network error updating scopes.');
+    }
+  };
+
+  // Handle Transfer Profile Ownership
+  const handleTransferOwnership = async (targetMembershipId: string) => {
+    if (!profileId) return;
+    try {
+      const res = await fetch(`/api/profiles/${profileId}/care-circle/transfer-ownership`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetMembershipId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMessage('Profile ownership successfully transferred.');
+        setTransferOwnershipTarget(null);
+        loadProfile();
+      } else {
+        setErrorMessage(data.error || 'Failed to transfer ownership.');
+      }
+    } catch {
+      setErrorMessage('Network error transferring ownership.');
     }
   };
 
@@ -586,12 +684,36 @@ export default function CareCircleDashboardPage() {
       {/* Profile Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
-          <div className="flex items-center gap-3 mb-1">
+          <div className="flex flex-wrap items-center gap-3 mb-1">
             <h1 className="text-3xl font-extrabold text-slate-900">{elderDisplayName}</h1>
             <Badge variant="success" className="text-sm">Active Care Circle</Badge>
             <Badge variant={isOwner ? 'critical' : 'outline'} className="text-xs">
               Role: {userRole}
             </Badge>
+
+            {/* Multi-Profile Switcher */}
+            {allMemberships.length > 1 && (
+              <div className="flex items-center gap-2 bg-slate-100 rounded-xl px-3 py-1.5 border border-slate-300 ml-2">
+                <label htmlFor="profile-switcher" className="text-xs font-bold text-slate-600 uppercase">
+                  Switch:
+                </label>
+                <select
+                  id="profile-switcher"
+                  value={profileId || ''}
+                  onChange={(e) => handleSwitchProfile(e.target.value)}
+                  className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none cursor-pointer"
+                >
+                  {allMemberships.map((m: any) => {
+                    const p = m.profile || m.careProfile;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.displayName || p.elderName} ({m.role})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
           </div>
           <p className="text-slate-600 text-base">
             Timezone: {profile?.timezone || 'Asia/Kolkata'} • Doctor: {profile?.primaryDoctorName || 'None assigned'} • Hospital: {profile?.preferredHospital || 'None'}
@@ -607,14 +729,24 @@ export default function CareCircleDashboardPage() {
           </Link>
 
           {isOwner && profile?.emergencyCode ? (
-            <Link
-              href={`/profiles/${profileId}/emergency?code=${profile.emergencyCode}`}
-              className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-700 font-bold border border-rose-200 hover:bg-rose-100 min-h-[48px] flex items-center gap-2"
-              title={`Emergency Code: ${profile.emergencyCode}`}
-            >
-              <Printer className="w-5 h-5" />
-              <span>Emergency Card ({profile.emergencyCode})</span>
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link
+                href={`/profiles/${profileId}/emergency?code=${profile.emergencyCode}`}
+                className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-700 font-bold border border-rose-200 hover:bg-rose-100 min-h-[48px] flex items-center gap-2"
+                title={`Emergency Code: ${profile.emergencyCode}`}
+              >
+                <Printer className="w-5 h-5" />
+                <span>Emergency Card ({profile.emergencyCode})</span>
+              </Link>
+              <button
+                type="button"
+                onClick={handleRotateEmergencyCode}
+                className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-300 min-h-[48px]"
+                title="Rotate emergency code"
+              >
+                Rotate
+              </button>
+            </div>
           ) : (
             <span
               className="px-3 py-2 rounded-xl bg-slate-100 text-slate-500 text-xs font-semibold flex items-center gap-1.5"
@@ -971,15 +1103,37 @@ export default function CareCircleDashboardPage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {isOwner && isPending && (
                       <button
-                        onClick={() => handleConfirmMember(member.id)}
+                        onClick={() => {
+                          setElderConfirmMemberModal(member);
+                          setElderConfirmScopes(member.scopes || {});
+                        }}
                         className="text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-300 min-h-[40px] flex items-center gap-1.5"
                       >
                         <Check className="w-4 h-4" />
-                        Confirm Member
+                        Elder Confirm
                       </button>
+                    )}
+                    {isOwner && !isPending && member.role !== 'OWNER' && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setScopeModalMember(member);
+                            setEditScopes(member.scopes || {});
+                          }}
+                          className="text-sm font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-300 min-h-[40px]"
+                        >
+                          Edit Scopes
+                        </button>
+                        <button
+                          onClick={() => setTransferOwnershipTarget(member)}
+                          className="text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-300 min-h-[40px]"
+                        >
+                          Transfer Ownership
+                        </button>
+                      </>
                     )}
                     {isOwner && member.role !== 'OWNER' && (
                       <button
@@ -1522,6 +1676,159 @@ export default function CareCircleDashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Member Scopes */}
+      {scopeModalMember && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 border border-slate-300 shadow-2xl space-y-5">
+            <h3 className="text-2xl font-extrabold text-slate-900">
+              Edit Scopes: {scopeModalMember.user?.name || scopeModalMember.user?.email}
+            </h3>
+            <p className="text-sm text-slate-600">
+              Adjust granular permissions for this member. Changes take effect on their next API request.
+            </p>
+
+            <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              {[
+                { key: 'manage_medications', label: 'Manage Medications & Record Doses' },
+                { key: 'view_medications', label: 'View Medications Schedule' },
+                { key: 'manage_appointments', label: 'Manage Appointments' },
+                { key: 'view_appointments', label: 'View Appointments' },
+                { key: 'write_notes', label: 'Create Care Notes' },
+                { key: 'view_notes', label: 'View Care Notes' },
+                { key: 'view_private_items', label: 'View Private Notes & Appointments' },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-3 text-sm font-semibold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!editScopes[key]}
+                    onChange={(e) => setEditScopes((prev) => ({ ...prev, [key]: e.target.checked }))}
+                    className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setScopeModalMember(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-300 font-bold hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveScopes}
+                className="flex-1 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              >
+                Save Scopes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Elder Confirmation for Pending Member */}
+      {elderConfirmMemberModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 border border-slate-300 shadow-2xl space-y-5">
+            <h3 className="text-2xl font-extrabold text-slate-900">
+              Confirm Care Circle Member
+            </h3>
+            <p className="text-sm text-slate-600">
+              <strong>{elderConfirmMemberModal.user?.name || elderConfirmMemberModal.user?.email}</strong> has accepted the invitation. Please confirm their role ({elderConfirmMemberModal.role}) and permissions before granting access:
+            </p>
+
+            <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              {[
+                { key: 'manage_medications', label: 'Manage Medications & Record Doses' },
+                { key: 'view_medications', label: 'View Medications Schedule' },
+                { key: 'manage_appointments', label: 'Manage Appointments' },
+                { key: 'view_appointments', label: 'View Appointments' },
+                { key: 'write_notes', label: 'Create Care Notes' },
+                { key: 'view_notes', label: 'View Care Notes' },
+                { key: 'view_private_items', label: 'View Private Notes & Appointments' },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-3 text-sm font-semibold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!elderConfirmScopes[key]}
+                    onChange={(e) => setElderConfirmScopes((prev) => ({ ...prev, [key]: e.target.checked }))}
+                    className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setElderConfirmMemberModal(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-300 font-bold hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmMember(elderConfirmMemberModal.id, elderConfirmScopes)}
+                className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+              >
+                Confirm & Grant Access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Transfer Ownership */}
+      {transferOwnershipTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 border border-slate-300 shadow-2xl space-y-5">
+            <h3 className="text-2xl font-extrabold text-slate-900 text-rose-600">
+              Transfer Profile Ownership
+            </h3>
+            <p className="text-base text-slate-700 leading-relaxed">
+              Are you sure you want to transfer primary ownership of <strong>{elderDisplayName}</strong> to{' '}
+              <strong>{transferOwnershipTarget.user?.name || transferOwnershipTarget.user?.email}</strong>?
+            </p>
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm">
+              The new owner will receive full administrative control over this profile, its care circle members, and sensitive settings.
+            </div>
+
+            <div className="flex gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setTransferOwnershipTarget(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-300 font-bold hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTransferOwnership(transferOwnershipTarget.id)}
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                Confirm Ownership Transfer
+              </button>
+            </div>
           </div>
         </div>
       )}

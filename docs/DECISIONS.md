@@ -220,6 +220,18 @@ This document records architectural, technical, and domain decisions made throug
   5. Enforced that real database and Redis integration tests fail fast (2.5s connection timeout) and throw hard assertion errors when `REQUIRE_DB=1` or `CI=true` rather than silently skipping.
 - **Rationale**: Guarantees accurate HTTP semantics, service resilience under infrastructure disruption, and complete data lifecycle cleanup without audit log corruption.
 
+### DEC-024: End-to-End Onboarding, Care Circle Lifecycle, Password Reset, TOTP Activation, and Senior Mode Timezone (Phase 8c)
+- **Date**: 2026-11-26
+- **Status**: Accepted
+- **Context**: Delivering complete end-to-end user workflows for onboarding, multi-profile switching, care circle invitation acceptance and elder confirmation, secure password reset, two-step TOTP verification, and Senior Mode timezone alignment.
+- **Decision**:
+  1. Onboarding & Multi-Profile Support: `signUpUser` creates both the `User` and their initial `CareProfile` with onboarding fields (`name`, `dateOfBirth`, `timezone`, `bloodType`, `consentVersion: 'v1.0'`) and default `OWNER` membership. Added multi-profile selector in dashboard header for accounts with multiple care circle memberships.
+  2. Care Circle Lifecycle: Built `/invite/accept` page and API route (`POST /api/invite/accept`), elder confirmation modal (`POST /api/profiles/[id]/care-circle/confirm` with customizable confirmed scopes), member scope editing (`PATCH /api/profiles/[id]/care-circle/[memberId]`), profile ownership transfer (`POST /api/profiles/[id]/care-circle/transfer-ownership`), and emergency code rotation (`POST /api/profiles/[id]/emergency-code`).
+  3. Password Reset Security: `requestPasswordReset` dispatches reset email via `sendEmail` with a 1-hour expiring link to `/password-reset?token=...` and strictly suppresses the raw token from responses across all environments. Built dedicated `/password-reset` page.
+  4. Two-Step TOTP 2FA Activation: `enrolTotp` generates secret and `otpauth://` URI without saving to the database. 2FA is only committed and enabled in `verifyAndEnableTotp` (`POST /api/auth/totp` action `verify`) after user submits a valid 6-digit TOTP code.
+  5. Senior Mode Timezone & Conflict Handling: Mapped medication details from `dose.schedule.medication`, computed day boundaries and time blocks in profile timezone (`Asia/Kolkata`), refreshed real data after actions, and handled 409 conflicts gracefully displaying the conflicting actor's name.
+- **Rationale**: Completes all interactive Phase 8c end-to-end flows with real API wiring, zero mocks in web routes, and airtight authorization and data integrity.
+
 
 
 

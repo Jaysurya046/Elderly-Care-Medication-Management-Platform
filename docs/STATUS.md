@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 8a (Leaks and Authorization Hardening) Completed and Verified*
+*Last updated: Phase 8c (End-to-End Flows) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,7 +13,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **27 test files, 167 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm test` | ✅ PASS | **28 test files, 180 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
 | `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
 | `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
@@ -191,6 +191,18 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **3. Route-Level Error Mapping** | ✅ Complete | Added test suite verifying exact HTTP status codes for auth endpoints: wrong password → 401 (`POST /api/auth/signin`), duplicate email → 409 (`POST /api/auth/signup`), Redis down in production → 503 (`POST /api/auth/signin`), and sixth consecutive failed login → 429 (`POST /api/auth/signin`). |
 | **4. Real Redis Rate Limiting & Reconnect Recovery** | ✅ Complete | Replaced static string matching with a functional Redis test asserting that calls 1–5 succeed, 6th call is blocked with `remaining: 0`, and key has a valid TTL in Redis. Hardened `getConnectedRedisClient` to recover after client disconnect/end events and environment URL switches. |
 | **5. Hardened processScheduledDeletions** | ✅ Complete | Hardened with bounded batch (`take: 50`), per-profile `try/catch` with Pino error logging, deletion of owner sessions, cascading deletion of care profile data, soft-deleting the owner's `User.deletedAt` if no remaining active memberships or profiles exist, and preserving append-only audit rows with intact `profileId`. |
+
+---
+
+## 13. Phase 8c: End-to-End Flows Summary
+
+| Phase 8c Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Onboarding & Multi-Profile Switcher** | ✅ Complete | `signUpUser` accepts onboarding fields (`name`, `dateOfBirth`, `timezone`, `bloodType`, `consentVersion: 'v1.0'`), creates `User`, initializes `CareProfile` with unique `emergencyCode`, and establishes default `OWNER` membership (`auth-service.ts`, `phase8c-end-to-end-flows.test.ts`). Sign-up page updated with DOB, Blood Type, Timezone inputs. Header profile switcher component renders on dashboard for multi-profile accounts. |
+| **2. Care Circle Lifecycle** | ✅ Complete | Built `/invite/accept` page and API route (`POST /api/invite/accept`), elder confirmation modal (`POST /api/profiles/[id]/care-circle/confirm` with scope customization), member scope editing (`PATCH /api/profiles/[id]/care-circle/[memberId]`), profile ownership transfer (`POST /api/profiles/[id]/care-circle/transfer-ownership`), and emergency code rotation (`POST /api/profiles/[id]/emergency-code`) (`care-circle-service.ts`, `profile-service.ts`, `phase8c-end-to-end-flows.test.ts`). |
+| **3. Password Reset Flow** | ✅ Complete | `requestPasswordReset` dispatches reset email via `sendEmail` with link to `/password-reset?token=...` (1-hour expiry, rate-limited to 3/hr) and strictly suppresses `rawToken` from responses across all environments. Built dedicated `/password-reset` page with password confirmation and session revocation (`auth-service.ts`, `phase8c-end-to-end-flows.test.ts`). |
+| **4. TOTP Two-Factor Authentication Activation** | ✅ Complete | `enrolTotp` generates secret and `otpauth://` URI without writing to the database. 2FA is only committed and enabled in `verifyAndEnableTotp` (`POST /api/auth/totp` action `verify`) after user submits a valid 6-digit TOTP code (`auth-service.ts`, `phase8c-end-to-end-flows.test.ts`). |
+| **5. Senior Mode Timezone & Conflict Handling** | ✅ Complete | Mapped medication details from `dose.schedule.medication`, computed day boundaries and time blocks in profile timezone (`Asia/Kolkata`), refreshed real data after actions, and handled 409 conflicts gracefully displaying the conflicting actor's name (`apps/web/src/app/senior/page.tsx`, `phase8c-end-to-end-flows.test.ts`). |
 
 
 

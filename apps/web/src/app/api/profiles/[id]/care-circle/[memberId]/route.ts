@@ -1,9 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireProfileAccess } from '@/lib/auth-guard';
-import { revokeCareCircleMembership } from '@/services/care-circle-service';
+import { revokeCareCircleMembership, updateCareCircleScopes } from '@/services/care-circle-service';
 import { handleApiError } from '@/lib/api-error';
 import { validateCsrfRequest } from '@/lib/csrf';
 import { Role } from '@elder-care/db';
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; memberId: string }> }
+) {
+  try {
+    const csrf = validateCsrfRequest(request);
+    if (!csrf.valid) {
+      return NextResponse.json(
+        { success: false, error: csrf.error },
+        { status: csrf.status || 403 }
+      );
+    }
+
+    const { id, memberId } = await params;
+    const { user } = await requireProfileAccess(id, { role: Role.OWNER });
+
+    const rawBody = await request.json();
+    const updated = await updateCareCircleScopes(id, memberId, rawBody.scopes || {}, user.id);
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error: any) {
+    return handleApiError(error, request);
+  }
+}
 
 export async function DELETE(
   request: NextRequest,

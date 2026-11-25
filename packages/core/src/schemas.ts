@@ -67,6 +67,9 @@ export const signUpSchema = z.object({
     message: 'Explicit consent to health data processing is required.',
   }),
   consentVersion: z.string().default('v1.0'),
+  dateOfBirth: z.union([z.string(), z.date()]).optional(),
+  timezone: z.string().max(100).optional(),
+  bloodType: z.string().max(10).optional(),
 });
 
 export const signInSchema = z.object({

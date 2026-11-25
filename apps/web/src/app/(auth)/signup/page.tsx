@@ -10,6 +10,9 @@ export default function SignUpPage() {
   const [name, setName] = React.useState('');
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
+  const [dateOfBirth, setDateOfBirth] = React.useState('1950-01-01');
+  const [timezone, setTimezone] = React.useState('Asia/Kolkata');
+  const [bloodType, setBloodType] = React.useState('O+');
   const [consentGiven, setConsentGiven] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState('');
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
@@ -35,6 +38,9 @@ export default function SignUpPage() {
           name: name.trim(),
           email: email.trim(),
           password,
+          dateOfBirth,
+          timezone,
+          bloodType,
           consentGiven: true,
           consentVersion: 'v1.0',
         }),
@@ -137,6 +143,58 @@ export default function SignUpPage() {
             {fieldErrors.password && (
               <p className="text-rose-600 text-sm font-semibold mt-1">{fieldErrors.password}</p>
             )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label htmlFor="dob" className="block text-sm font-bold text-slate-800 mb-1">
+                Date of Birth
+              </label>
+              <input
+                id="dob"
+                type="date"
+                required
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border-2 border-slate-300 text-base focus:border-blue-600 focus:outline-none min-h-[48px]"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="bloodType" className="block text-sm font-bold text-slate-800 mb-1">
+                Blood Type
+              </label>
+              <select
+                id="bloodType"
+                value={bloodType}
+                onChange={(e) => setBloodType(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border-2 border-slate-300 text-base focus:border-blue-600 focus:outline-none min-h-[48px] bg-white"
+              >
+                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'Unknown'].map((bt) => (
+                  <option key={bt} value={bt}>
+                    {bt}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="timezone" className="block text-sm font-bold text-slate-800 mb-1">
+                Timezone
+              </label>
+              <select
+                id="timezone"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border-2 border-slate-300 text-base focus:border-blue-600 focus:outline-none min-h-[48px] bg-white"
+              >
+                <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                <option value="America/New_York">America/New_York (EST)</option>
+                <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
+                <option value="Europe/London">Europe/London (GMT)</option>
+                <option value="UTC">UTC</option>
+              </select>
+            </div>
           </div>
 
           {/* Explicit Consent & Privacy Notice (Section 8 DPDP & GDPR requirement) */}

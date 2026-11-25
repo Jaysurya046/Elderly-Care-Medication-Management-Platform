@@ -344,3 +344,57 @@ export async function updateCareCircleScopes(
 
   return updated;
 }
+
+export async function transferProfileOwnership(
+  profileId: string,
+  targetMembershipId: string,
+  actorUserId?: string
+): Promise<{ success: boolean }> {
+  const { membership: actorMembership } = await requireProfileAccess(profileId, {
+    role: Role.OWNER,
+    userIdOverride: actorUserId,
+  });
+
+  const target = await prisma.membership.findUnique({
+    where: { id: targetMembershipId },
+  });
+
+  if (!target || target.profileId !== profileId) {
+    throw new NotFoundError('Target membership not found in this profile.');
+  }
+
+  if (target.status !== MembershipStatus.ACTIVE) {
+    throw new ConflictError('Cannot transfer ownership to an inactive or revoked member.');
+  }
+
+  // Update profile ownerId
+  await prisma.careProfile.update({
+    where: { id: profileId },
+    data: { ownerId: target.userId },
+  });
+
+  // Promote target member to OWNER with default OWNER scopes
+  await prisma.membership.update({
+    where: { id: targetMembershipId },
+    data: {
+      role: Role.OWNER,
+      scopes: DEFAULT_ROLE_SCOPES.OWNER as any,
+    },
+  });
+
+  await recordAuditLog({
+    profileId,
+    actorUserId: actorMembership.userId,
+    actorMembershipId: actorMembership.id,
+    action: 'CARE_CIRCLE:TRANSFER_OWNERSHIP',
+    entityType: 'CareProfile',
+    entityId: profileId,
+    metadata: {
+      previousOwnerId: actorMembership.userId,
+      newOwnerUserId: target.userId,
+      newOwnerMembershipId: target.id,
+    },
+  });
+
+  return { success: true };
+}

@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { prisma, User } from '@elder-care/db';
+import { prisma, User, Role, MembershipStatus } from '@elder-care/db';
 import {
   AuthError,
   ConflictError,
   ValidationError,
   RateLimitError,
   ServiceUnavailableError,
+  DEFAULT_ROLE_SCOPES,
 } from '@elder-care/core';
 import {
   hashSecret,
@@ -15,16 +16,22 @@ import {
   encryptString,
   decryptString,
   generateRandomToken,
+  generateEmergencyCode,
 } from '../lib/crypto';
 import { checkRateLimit, resetRateLimit } from '../lib/rate-limiter';
 import { recordAuditLog } from '../lib/audit';
 import { UnauthorizedError, ForbiddenError } from '../lib/auth-guard';
+import { sendEmail } from '../lib/email';
 
 export interface SignUpInput {
   email: string;
   name: string;
   password: string;
   consentGiven: boolean;
+  consentVersion?: string;
+  dateOfBirth?: string | Date;
+  timezone?: string;
+  bloodType?: string;
 }
 
 export async function signUpUser(input: SignUpInput): Promise<User> {
@@ -48,6 +55,43 @@ export async function signUpUser(input: SignUpInput): Promise<User> {
       consentVersion: 'v1.0',
     },
   });
+
+  let emergencyCode = generateEmergencyCode();
+  while (prisma.careProfile?.findUnique && (await prisma.careProfile.findUnique({ where: { emergencyCode } }))) {
+    emergencyCode = generateEmergencyCode();
+  }
+
+  let profile: any = null;
+  if (prisma.careProfile?.create) {
+    profile = await prisma.careProfile.create({
+      data: {
+        ownerId: user.id,
+        displayName: user.name,
+        dateOfBirth: input.dateOfBirth
+          ? typeof input.dateOfBirth === 'string'
+            ? new Date(input.dateOfBirth)
+            : input.dateOfBirth
+          : new Date('1950-01-01'),
+        timezone: input.timezone || 'Asia/Kolkata',
+        bloodType: input.bloodType || 'Unknown',
+        emergencyCode,
+        emailShowsMedicineNames: false,
+        readAloudEnabled: true,
+      },
+    });
+  }
+
+  if (profile && prisma.membership?.create) {
+    await prisma.membership.create({
+      data: {
+        profileId: profile.id,
+        userId: user.id,
+        role: Role.OWNER,
+        scopes: DEFAULT_ROLE_SCOPES.OWNER,
+        status: MembershipStatus.ACTIVE,
+      },
+    });
+  }
 
   await recordAuditLog({
     actorUserId: user.id,
@@ -305,9 +349,16 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
     metadata: { action: 'PASSWORD_RESET_REQUESTED' },
   });
 
+  const appBaseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+  const resetUrl = `${appBaseUrl}/password-reset?token=${rawToken}`;
+  await sendEmail({
+    to: normalizedEmail,
+    subject: 'Password Reset Request',
+    html: `<p>Hello ${user.name},</p><p>You requested a password reset. Please use the following link to reset your password (valid for 1 hour):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+  });
+
   return {
     success: true,
-    rawToken: process.env.NODE_ENV !== 'production' ? rawToken : undefined,
   };
 }
 
@@ -369,7 +420,7 @@ export async function resetPasswordWithToken(
 
 /**
  * Enrolls TOTP two-factor authentication for a user.
- * Generates an encrypted secret stored at rest.
+ * Generates the secret and otpauth URI without enabling it yet.
  */
 export async function enrolTotp(userId: string): Promise<{ secret: string; otpauthUrl: string }> {
   const user = await prisma.user.findUnique({
@@ -378,14 +429,42 @@ export async function enrolTotp(userId: string): Promise<{ secret: string; otpau
   if (!user) throw new UnauthorizedError();
 
   const totp = generateTotpSecret(user.email);
-  const encryptedSecret = encryptString(totp.secret);
+  return { secret: totp.secret, otpauthUrl: totp.uri };
+}
 
+/**
+ * Verifies the TOTP code submitted by user during enrolment and enables 2FA.
+ */
+export async function verifyAndEnableTotp(
+  userId: string,
+  secret: string,
+  code: string
+): Promise<{ success: boolean }> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) throw new UnauthorizedError();
+
+  const isValid = verifyTotpCode(secret, code);
+  if (!isValid) {
+    throw new ValidationError('Invalid two-factor authentication code.');
+  }
+
+  const encryptedSecret = encryptString(secret);
   await prisma.user.update({
     where: { id: userId },
     data: { totpSecret: encryptedSecret },
   });
 
-  return { secret: totp.secret, otpauthUrl: totp.uri };
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'AUTH:LOGIN',
+    entityType: 'User',
+    entityId: userId,
+    metadata: { action: 'TOTP_ENABLED' },
+  });
+
+  return { success: true };
 }
 
 /**

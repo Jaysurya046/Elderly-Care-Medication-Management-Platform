@@ -1,6 +1,6 @@
 # System Status & Audit (Fix Pass)
 
-*Last updated: Phase 8c (End-to-End Flows) Completed and Verified*
+*Last updated: Phase 8d-1 (Worker, Timezone, and Email Alerts) Completed and Verified*
 
 This document provides an honest, evidence-based assessment of the repository's status against [`Goal.md`](file:///c:/Users/jayas/OneDrive/Desktop/web_development/Elderly%20Care%20&%20Medication%20Management%20Platform/Goal.md).
 
@@ -13,7 +13,7 @@ This document provides an honest, evidence-based assessment of the repository's 
 | `pnpm install --frozen-lockfile` | ✅ PASS | Upgraded Next.js from vulnerable 15.1.0 to patched `15.5.29` and `eslint-config-next@15.5.29`. Lockfile verified cleanly. |
 | `pnpm lint` | ✅ PASS | Added ESLint configuration in `apps/web/.eslintrc.json`, added `lint` script across all workspace packages (`core`, `db`, `email`, `ui`, `worker`, `web`), fixed unescaped entity warnings. Result: `✔ No ESLint warnings or errors`. |
 | `pnpm type-check` | ✅ PASS | Clean execution of `tsc --noEmit` across all 6 workspace projects: `packages/core`, `packages/db`, `packages/email`, `packages/ui`, `apps/worker`, `apps/web`. 0 errors. |
-| `pnpm test` | ✅ PASS | **29 test files, 188 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
+| `pnpm test` | ✅ PASS | **32 test files, 205 tests passing in Vitest (0 failed).** Full suite passes cleanly. |
 | `pnpm build` | ✅ PASS | Prisma client generated; `@elder-care/core`, `@elder-care/db`, `@elder-care/worker` (via `tsup`), and Next.js 15.5.29 optimized production build completed with 0 errors across all routes and edge middleware. |
 | `pnpm --filter @elder-care/worker build` | ✅ PASS | `tsup` bundles `apps/worker/src/index.ts` with inlined workspace dependencies into `dist/index.js` (1.95 MB) in 308ms. |
 | `node apps/worker/dist/index.js` | ✅ PASS | Starts cleanly: outputs `Registering repeatable cron schedules...` and `Starting Elder Care background worker process...`. Zero ESM module resolution errors. |
@@ -206,6 +206,21 @@ This document provides an honest, evidence-based assessment of the repository's 
 | **6. Snooze snoozedUntil & Re-send Reminder** | ✅ Complete | Added `snoozedUntil` column to `DoseEvent` (migration `20261123000000_add_snoozed_until`). `recordDoseAction` computes and saves `snoozedUntil = actedAt + snoozeMinutes * 60 * 1000`. Worker re-sends reminder when `now >= snoozedUntil` with deterministic reference key (`${id}_snooze_${count}`), while auto-miss grace period strictly runs from `scheduledAt` (`medication-service.ts`, `dose-reminders.job.ts`, `phase8c-snooze-deactivation-correction.test.ts`). |
 | **7. Medicine Deactivation & Future Doses Cancellation** | ✅ Complete | Deactivating a medication via `updateMedication` (`isActive: false`) or `deleteMedication` immediately cancels all future scheduled doses (`scheduledAt >= now`) by updating status to `SKIPPED` with note `'Cancelled: Medication deactivated'`. Background workers (`auto-miss.job.ts`, `dose-reminders.job.ts`, `critical-escalation.job.ts`, `dose-generator.job.ts`) strictly skip inactive medications (`medication-service.ts`, `phase8c-snooze-deactivation-correction.test.ts`). |
 | **8. Action Route Separation & Mandatory Correction Reason** | ✅ Complete | Removed `CORRECTION` from `doseActionSchema` and `/api/profiles/[id]/doses/[doseId]/action`, rejecting correction actions on the general endpoint with 400 Validation Error. Corrections go exclusively through `/api/profiles/[id]/doses/[doseId]/correction` requiring a non-empty `reason` (`schemas.ts`, `dose-action/route.ts`, `phase8c-snooze-deactivation-correction.test.ts`). |
+
+---
+
+## 14. Phase 8d-1: Worker, Timezones, Notification Retries & Email Alerts Summary
+
+| Phase 8d-1 Item | Status | Verified Implementation |
+|---|---|---|
+| **1. Schedules Timezone Engine** | ✅ Complete | Rebuilt `expandSchedule` in `@elder-care/core/src/schedules.ts` to derive local calendar dates (`YYYY-MM-DD`) via normalized midday UTC dates (`Date.UTC(y, m-1, d, 12, 0, 0)`) and construct exact UTC instants directly with `fromZonedTime(`${dateStr}T${timeStr}:00`, tz)`. Eliminates host machine timezone pollution across `America/New_York`, `America/Los_Angeles`, `Australia/Sydney`, `Asia/Kolkata`, a weekly `BYDAY` rule west of UTC, spring-forward DST, fall-back DST, midnight rollover (`00:00`), and leap days (`Feb 29`). Verified by `packages/core/src/__tests__/phase8d-schedules-timezone.test.ts` (9 tests passing). |
+| **2. Quiet Hours Deferral to 06:30** | ✅ Complete | In `apps/worker/src/jobs/dose-reminders.job.ts`, non-critical doses scheduled during quiet hours (22:00–06:30) are deferred until 06:30 local time. The lookback scanner window is expanded up to 12 hours ago so when the worker executes at 06:30 local time, all deferred doses from the previous night are scanned and sent rather than dropped. Verified by `apps/worker/src/__tests__/phase8d-worker-notifications.test.ts`. |
+| **3. Failed Notification Retries with Backoff** | ✅ Complete | Implemented `processNotificationRetries` (`apps/worker/src/jobs/notification-retries.job.ts`), registered in worker repeatable cron running every 2 minutes. Retries failed notification logs (`attempts < 3`) with exponential backoff (attempt 1 after 2 min, attempt 2 after 10 min), capping at 3 attempts. Verified by `apps/worker/src/__tests__/phase8d-worker-notifications.test.ts`. |
+| **4. Low-Stock Unique-Key Race Handling** | ✅ Complete | In `apps/worker/src/jobs/low-stock.job.ts`, wrapped `prisma.notificationLog.create` in a try/catch block intercepting Prisma `P2002` unique constraint violations on `referenceKey`, gracefully treating concurrent worker duplicate attempts as idempotent no-ops. Verified by `apps/worker/src/__tests__/phase8d-worker-notifications.test.ts`. |
+| **5. Missed-Dose Email to Elder** | ✅ Complete | In `apps/worker/src/jobs/auto-miss.job.ts`, when a dose transitions to `MISSED` after grace expiration, sends `MissedDoseEmail` (`DOSE_MISSED`) to the elder's user email, respecting `emailShowsMedicineNames` privacy settings. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
+| **6. Dose-Due-Now Email** | ✅ Complete | In `apps/worker/src/jobs/dose-reminders.job.ts`, when reference time reaches `scheduledAt` and dose remains `PENDING`, dispatches `DoseDueNowEmail` with `DOSE_DUE_NOW` notification type and reference key. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
+| **7. Travel-Aware Appointment Leave-By Alert** | ✅ Complete | In `apps/worker/src/jobs/appointment-reminders.job.ts`, calculates `leaveByTime = startsAt - travelMinutes`. Dispatches `APPOINTMENT_LEAVE_BY` alert to eligible members when reference time reaches `leaveByTime`, including estimated travel time and respecting privacy visibility. Verified by `apps/worker/src/__tests__/phase8d-emails-and-alerts.test.ts`. |
+
 
 
 

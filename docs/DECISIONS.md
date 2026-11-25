@@ -230,15 +230,8 @@ This document records architectural, technical, and domain decisions made throug
   3. Password Reset Security: `requestPasswordReset` dispatches reset email via `sendEmail` with a 1-hour expiring link to `/password-reset?token=...` and strictly suppresses the raw token from responses across all environments. Built dedicated `/password-reset` page.
   4. Two-Step TOTP 2FA Activation: `enrolTotp` generates secret and `otpauth://` URI without saving to the database. 2FA is only committed and enabled in `verifyAndEnableTotp` (`POST /api/auth/totp` action `verify`) after user submits a valid 6-digit TOTP code.
   5. Senior Mode Timezone & Conflict Handling: Mapped medication details from `dose.schedule.medication`, computed day boundaries and time blocks in profile timezone (`Asia/Kolkata`), refreshed real data after actions, and handled 409 conflicts gracefully displaying the conflicting actor's name.
-- **Rationale**: Completes all interactive Phase 8c end-to-end flows with real API wiring, zero mocks in web routes, and airtight authorization and data integrity.### DEC-025: SnoozedUntil Migration, Medication Deactivation Doses Cancellation, and Correction Route Separation (Phase 8c Part 2)
-- **Date**: 2026-11-26
-- **Status**: Accepted
-- **Context**: Accurate dose reminder re-scheduling for snoozed doses, clean cancellation of future scheduled doses when medications are deactivated or deleted, ensuring background worker scans skip inactive medications, and strictly disallowing CORRECTION actions on the general action route.
-- **Decision**:
-  1. Snooze & snoozedUntil Migration: Added `snoozedUntil` column (`TIMESTAMPTZ(6)`) to `DoseEvent` in `schema.prisma` and committed migration `20261123000000_add_snoozed_until`. `recordDoseAction` computes `snoozedUntil = actedAt + snoozeMinutes * 60 * 1000`. `processDoseReminders` re-sends reminders when `referenceTime >= snoozedUntil` with unique reference keys (`${id}_snooze_${count}`). Auto-miss grace period strictly measures from `scheduledAt`.
-  2. Medication Deactivation & Worker Skipping: `updateMedication` (when `isActive: false`) and `deleteMedication` immediately cancel all future PENDING and SNOOZED doses (`scheduledAt >= now`) by updating their status to `SKIPPED` with note `'Cancelled: Medication deactivated'`. Background workers (`auto-miss.job.ts`, `dose-reminders.job.ts`, `critical-escalation.job.ts`, and `dose-generator.job.ts`) strictly query `medication: { isActive: true }`.
-  3. Action Route Separation: Removed `CORRECTION` from `doseActionSchema` and the general action endpoint (`POST /api/profiles/[id]/doses/[doseId]/action`), rejecting any correction attempt with 400 Validation Error. Corrections are routed exclusively to `POST /api/profiles/[id]/doses/[doseId]/correction` which enforces a mandatory non-empty reason (`doseCorrectionSchema.reason.trim().min(1)`).
-- **Rationale**: Mandated by Goal.md Section 6.1, 6.2, and Phase 8c correction specifications.
+- **Rationale**: Completes all interactive Phase 8c end-to-end flows with real API wiring, zero mocks in web routes, and airtight authorization and data integrity.
+
 ### DEC-025: SnoozedUntil Migration, Medication Deactivation Doses Cancellation, and Correction Route Separation (Phase 8c Part 2)
 - **Date**: 2026-11-26
 - **Status**: Accepted
@@ -248,3 +241,18 @@ This document records architectural, technical, and domain decisions made throug
   2. Medication Deactivation & Worker Skipping: `updateMedication` (when `isActive: false`) and `deleteMedication` immediately cancel all future PENDING and SNOOZED doses (`scheduledAt >= now`) by updating their status to `SKIPPED` with note `'Cancelled: Medication deactivated'`. Background workers (`auto-miss.job.ts`, `dose-reminders.job.ts`, `critical-escalation.job.ts`, and `dose-generator.job.ts`) strictly query `medication: { isActive: true }`.
   3. Action Route Separation: Removed `CORRECTION` from `doseActionSchema` and the general action endpoint (`POST /api/profiles/[id]/doses/[doseId]/action`), rejecting any correction attempt with 400 Validation Error. Corrections are routed exclusively to `POST /api/profiles/[id]/doses/[doseId]/correction` which enforces a mandatory non-empty reason (`doseCorrectionSchema.reason.trim().min(1)`).
 - **Rationale**: Mandated by Goal.md Section 6.1, 6.2, and Phase 8c correction specifications.
+
+### DEC-026: Timezone-Safe Schedule Expansion, Worker Quiet Hours Deferral, Notification Retries, and Email Alerts (Phase 8d-1)
+- **Date**: 2026-11-26
+- **Status**: Accepted
+- **Context**: Fixing host machine timezone distortion in `expandSchedule`, deferring quiet hours non-critical notifications to 06:30 local release without dropping them, retrying failed notifications with exponential backoff, handling unique-key races concurrently, and dispatching missed-dose, due-now, and travel-aware appointment alerts.
+- **Decision**:
+  1. Schedules Engine Timezone Independence: Rebuilt `expandSchedule` in `@elder-care/core/src/schedules.ts` to evaluate RRULE recurrence using normalized midday UTC calendar dates (`Date.UTC(y, m-1, d, 12, 0, 0)`), deriving exact local date strings (`YYYY-MM-DD`) and constructing target UTC timestamps directly with `fromZonedTime(`${dateStr}T${timeStr}:00`, tz)`. Eliminates host machine timezone pollution across `America/New_York`, `America/Los_Angeles`, `Australia/Sydney`, `Asia/Kolkata`, spring-forward/fall-back DST, midnight rollover (`00:00`), and leap days (`Feb 29`).
+  2. Worker Quiet Hours Deferral to 06:30: `processDoseReminders` defers non-critical doses scheduled during quiet hours to 06:30 local time. The lookback scan window is expanded up to 12 hours ago so when the worker executes at 06:30, all pending doses from the preceding quiet hours are processed and dispatched instead of being dropped.
+  3. Failed Notification Retries with Backoff: Created `processNotificationRetries` (`apps/worker/src/jobs/notification-retries.job.ts`) scheduled every 2 minutes. Retries failed notification logs (`attempts < 3`) with exponential backoff (attempt 1 after 2 min, attempt 2 after 10 min), capping at 3 attempts.
+  4. Low-Stock Unique-Key Race: `processLowStockAlerts` wraps `notificationLog.create` in a try/catch block that intercepts Prisma `P2002` unique constraint violations, gracefully treating concurrent worker execution as an idempotent no-op.
+  5. Missed-Dose, Due-Now & Travel-Aware Alerts:
+     - `processAutoMissDoses` sends `MissedDoseEmail` (`DOSE_MISSED`) to the elder upon grace expiration.
+     - `processDoseReminders` sends `DoseDueNowEmail` (`DOSE_DUE_NOW`) at scheduled time if dose remains PENDING.
+     - `processAppointmentReminders` triggers travel-aware leave-by alerts (`APPOINTMENT_LEAVE_BY`) at `startsAt - travelMinutes`.
+- **Rationale**: Mandated by Goal.md Section 6.2, 6.3, 7.2, and Phase 8d specifications.
